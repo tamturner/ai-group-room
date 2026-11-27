@@ -62,11 +62,12 @@
   <div class="top-bar">
     <h1>AI Group Room — Collaborative Workspace</h1>
     <div class="btn-group" style="margin-top:0;">
-      <button class="secondary" onclick="syncAllToGitHub(true)">Sync All to GitHub</button>
+      <button class="secondary" onclick="syncAllToGitHub(true)">Sync All to GitHub<div class="btn-group" style="margin-top:0;">
+      <button class="secondary" onclick="syncAllToGitHub(true)">Save All to GitHub</button>
+      <button class="secondary" onclick="loadFromGitHub()">Load from GitHub</button>
       <button class="secondary" onclick="downloadTranscript()">Download Chat .md</button>
       <button class="danger" onclick="clearChat()">Clear Chat</button>
     </div>
-  </div>
 
   <!-- PINNED BRIEF -->
   <div class="card brief-card">
@@ -88,9 +89,9 @@
     </div>
   </details>
 
-  <!-- API KEYS & GITHUB SETTINGS -->
+ <!-- API KEYS & GITHUB SETTINGS -->
   <details class="card">
-    <summary>API Keys, Personas & GitHub Auto-Commit Settings</summary>
+    <summary>API Keys, Personas, GitHub Sync &amp; Google Doc Bridge</summary>
     <div class="grid-3" style="margin-top: 0.8rem;">
       <div><label>OpenAI Key (ChatGPT)</label><input type="password" id="openaiKey" placeholder="sk-..." /></div>
       <div><label>Anthropic Key (Claude)</label><input type="password" id="claudeKey" placeholder="sk-ant-..." /></div>
@@ -101,9 +102,13 @@
       <div><label>Claude Persona</label><input type="text" id="claudePersona" value="Thoughtful architect who spots edge cases and nuances" /></div>
       <div><label>Gemini Persona</label><input type="text" id="geminiPersona" value="Creative systems thinker who connects broader patterns" /></div>
     </div>
-    <div class="section-title">Direct GitHub Repo Auto-Commit</div>
+    <div class="section-title">Direct GitHub Repo Auto-Commit &amp; Session Backup</div>
     <div class="grid-3">
-         <div class="section-title">Live Google Doc Bridge (Optional)</div>
+      <div><label>GitHub Personal Access Token</label><input type="password" id="ghToken" placeholder="github_pat_... or ghp_..." /></div>
+      <div><label>Repository (owner/repo)</label><input type="text" id="ghRepo" placeholder="tamturner/ai-group-room" /></div>
+      <div><label>Branch</label><input type="text" id="ghBranch" value="main" /></div>
+    </div>
+    <div class="section-title">Live Google Doc Bridge (Optional)</div>
     <div class="grid-3">
       <div style="grid-column: span 2;">
         <label>Google Apps Script Web App URL</label>
@@ -116,7 +121,7 @@
     </div>
     <div class="checkbox-row">
       <input type="checkbox" id="rememberKeys" />
-      <label for="rememberKeys" style="font-weight:normal; color:#c9d1d9; cursor:pointer;">Remember API keys & GitHub token in this browser</label>
+      <label for="rememberKeys" style="font-weight:normal; color:#c9d1d9; cursor:pointer;">Remember API keys &amp; GitHub token in this browser</label>
     </div>
   </details>
 
@@ -546,16 +551,58 @@
       const repo = document.getElementById("ghRepo").value.trim();
       const branch = document.getElementById("ghBranch").value.trim() || "main";
       if (!token || !repo) { if (manual) alert("Enter your GitHub Token and Repository first."); return; }
-      syncBadge.textContent = "GitHub Sync: Committing..."; syncBadge.className = "sync-badge";
+      syncBadge.textContent = "GitHub Sync: Saving..."; syncBadge.className = "sync-badge";
       const headers = { "Authorization": "Bearer " + token, "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json" };
       const workFile = (workingDocTitle.value.trim() || "WORKING_DOC.md").replace(/^\/+/, "");
+      const sessionSnapshot = JSON.stringify({
+        savedAt: new Date().toISOString(),
+        brief: projectBrief.value,
+        refDocs: refDocs,
+        workTitle: workingDocTitle.value,
+        workBody: workingDocContent.value,
+        transcript: transcript
+      }, null, 2);
       try {
         await commitSingleFile(repo, branch, "transcripts/SHARED_CHAT.md", buildTranscriptMarkdown(), "Update chat transcript (" + new Date().toLocaleTimeString() + ")", headers);
         await commitSingleFile(repo, branch, "workspace/" + workFile, workingDocContent.value, "Update working doc " + workFile + " (" + new Date().toLocaleTimeString() + ")", headers);
+        await commitSingleFile(repo, branch, "workspace/SESSION_BACKUP.json", sessionSnapshot, "Save full workspace backup (" + new Date().toLocaleTimeString() + ")", headers);
         const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-        syncBadge.textContent = "GitHub Sync: Saved chat & " + workFile + " at " + time; syncBadge.className = "sync-badge sync-ok";
+        syncBadge.textContent = "GitHub Sync: All saved at " + time; syncBadge.className = "sync-badge sync-ok";
       } catch (err) {
         syncBadge.textContent = "GitHub Sync Error: " + err.message; syncBadge.className = "sync-badge sync-err";
+      }
+    }
+
+    async function loadFromGitHub() {
+      const token = document.getElementById("ghToken").value.trim();
+      const repo = document.getElementById("ghRepo").value.trim();
+      const branch = document.getElementById("ghBranch").value.trim() || "main";
+      if (!token || !repo) return alert("Enter your GitHub Token and Repository in Settings first.");
+      statusText.textContent = "Loading saved workspace from GitHub...";
+      try {
+        const apiUrl = ["https://github.com", "repos", repo, "contents", "workspace/SESSION_BACKUP.json"].join("/") + "?ref=" + encodeURIComponent(branch);
+        const res = await fetch(apiUrl, { headers: { "Authorization": "Bearer " + token, "Accept": "application/vnd.github+json" } });
+        if (!res.ok) throw new Error("No saved backup found yet (HTTP " + res.status + ")");
+        const data = await res.json();
+        const bin = atob(data.content.replace(/\n/g, ""));
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const state = JSON.parse(new TextDecoder().decode(bytes));
+        projectBrief.value = state.brief || "";
+        refDocs = state.refDocs || [];
+        workingDocTitle.value = state.workTitle || "WORKING_DOC.md";
+        workingDocContent.value = state.workBody || "";
+        transcript = state.transcript || [];
+        localStorage.setItem(KEYS.BRIEF, projectBrief.value);
+        saveRefDocs();
+        localStorage.setItem(KEYS.WORK_TITLE, workingDocTitle.value);
+        localStorage.setItem(KEYS.WORK_BODY, workingDocContent.value);
+        localStorage.setItem(KEYS.TRANSCRIPT, JSON.stringify(transcript));
+        renderRefDocs();
+        renderAll();
+        statusText.textContent = "Restored full workspace from GitHub (" + new Date(state.savedAt).toLocaleString() + ").";
+      } catch (err) {
+        statusText.textContent = "Load Error: " + err.message;
       }
     }
  // Google Doc Pull & Push Bridge
