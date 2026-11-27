@@ -91,15 +91,22 @@ export class RoomRelay extends DurableObject {
   unsubscribe(params) { return this.run(relay => relay.unsubscribe(params)); }
   alarm() { return this.run(async relay => { await relay.tick(); }); }
 
-  consumePairingCode(hash) {
+  reservePairingCode(hash, reservation) {
+    // The HTTPS Worker checks the current secret and expiry before calling this
+    // private binding. The Durable Object only enforces single use.
     return this.ctx.storage.transactionSync(() => {
-      if (!equalSecret(hash, this.env.ROOM_PAIRING_HASH) || Date.now() >= Date.parse(this.env.ROOM_PAIRING_EXPIRY) ||
-          !Number.isFinite(Date.parse(this.env.ROOM_PAIRING_EXPIRY))) return false;
-      const [row] = this.ctx.storage.sql.exec("SELECT value FROM relay_state WHERE key = 'pairing'").toArray();
-      if (row?.value === hash) return false;
-      this.ctx.storage.sql.exec("INSERT OR REPLACE INTO relay_state VALUES ('pairing', ?)", hash);
+      const key = "pairing:" + hash;
+      const [used] = this.ctx.storage.sql.exec(
+        "SELECT 1 FROM relay_state WHERE key = ? OR (key = 'pairing' AND value = ?)", key, hash
+      ).toArray();
+      if (used) return false;
+      this.ctx.storage.sql.exec("INSERT INTO relay_state VALUES (?, ?)", key, reservation);
       return true;
     });
+  }
+
+  releasePairingCode(hash, reservation) {
+    this.ctx.storage.sql.exec("DELETE FROM relay_state WHERE key = ? AND value = ?", "pairing:" + hash, reservation);
   }
 }
 
@@ -168,14 +175,30 @@ async function authorize(request, env) {
   if (!/^[a-f0-9]{32}$/.test(code)) return new Response("Enter the one-time code from the pilot setup.", { status: 403 });
   const hash = createHash("sha256").update(code).digest("hex");
   if (!equalSecret(hash, env.ROOM_PAIRING_HASH)) return new Response("The pairing code is invalid.", { status: 403 });
-  const approved = await oauth.approveConsent(request, handle, { scope: [scope] });
-  if (!isChatGPTRedirect(approved.request.redirectUri) || !await relayStub(env).consumePairingCode(hash)) {
-    return new Response("This pairing code was already used or has expired.", { status: 403 });
+  const expiresAt = Date.parse(env.ROOM_PAIRING_EXPIRY);
+  if (!Number.isFinite(expiresAt) || Date.now() >= expiresAt) {
+    return new Response("This pairing code has expired.", { status: 403 });
   }
-  const grant = await oauth.completeAuthorization({
-    request: approved.request, userId: owner, metadata: { name: "AI Group Room Pickup Pilot" },
-    scope: [scope], props: { userId: owner }
-  });
+  const approved = await oauth.approveConsent(request, handle, { scope: [scope] });
+  if (!isChatGPTRedirect(approved.request.redirectUri)) {
+    return new Response("Open Connect again in ChatGPT to start a new authorization.", { status: 400 });
+  }
+
+  const stub = relayStub(env);
+  const reservation = crypto.randomUUID();
+  if (!await stub.reservePairingCode(hash, reservation)) {
+    return new Response("This pairing code has already been used.", { status: 403 });
+  }
+  let grant;
+  try {
+    grant = await oauth.completeAuthorization({
+      request: approved.request, userId: owner, metadata: { name: "AI Group Room Pickup Pilot" },
+      scope: [scope], props: { userId: owner }
+    });
+  } catch (err) {
+    await stub.releasePairingCode(hash, reservation);
+    throw err;
+  }
   approved.headers.set("Location", grant.redirectTo);
   return new Response(null, { status: 302, headers: approved.headers });
 }

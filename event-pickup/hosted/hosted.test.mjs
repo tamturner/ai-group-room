@@ -91,7 +91,9 @@ test("hosted OAuth authorizes one owner, consumes the pairing code once and expo
   const target = new URL(allowed.headers.get("location"));
   assert.equal(target.pathname, "/connector/oauth/test-client");
   assert.equal(target.searchParams.get("state"), "one-test-state");
-  assert.equal((await confirm(syntheticCode)).status, 403);
+  const reused = await confirm(syntheticCode);
+  assert.equal(reused.status, 403);
+  assert.match(await reused.text(), /already been used/);
   const exchange = await post("/oauth/token", new URLSearchParams({
     grant_type: "authorization_code", code: target.searchParams.get("code"),
     redirect_uri: redirect, client_id: registration.client_id, code_verifier: verifier,
