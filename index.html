@@ -147,21 +147,27 @@
     </div>
 
     <!-- LIVE SHARED WORKING DOCUMENT -->
-    <div class="card" style="margin-bottom:0;">
-<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.4rem;">
-        <label style="color:#3fb950; font-size:0.85rem;">Live Shared Working Document</label>
-        <div style="display:flex; gap:0.4rem;">
-          <input type="file" id="workingFileInput" accept=".txt,.md,.json,.csv,.js,.py,.html,.css,.docx" style="display:none;" />
-         <button class="secondary" style="padding:0.3rem 0.6rem; font-size:0.78rem;" onclick="pullFromGoogleDoc()">Pull GDoc</button>
+<div class="card" style="margin-bottom:0;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.45rem; flex-wrap:wrap; gap:0.4rem;">
+        <label style="color:#3fb950; font-size:0.85rem;">Live Shared Working Documents</label>
+        <div style="display:flex; gap:0.35rem; flex-wrap:wrap;">
+          <button class="secondary" style="padding:0.3rem 0.6rem; font-size:0.78rem;" onclick="addNewWorkingDoc()">+ New Tab</button>
+          <button class="secondary" style="padding:0.3rem 0.6rem; font-size:0.78rem;" onclick="pullFromGoogleDoc()">Pull GDoc</button>
           <button class="secondary" style="padding:0.3rem 0.6rem; font-size:0.78rem;" onclick="pushToGoogleDoc(true)">Push GDoc</button>
+          <input type="file" id="workingFileInput" accept=".txt,.md,.json,.csv,.js,.py,.html,.css,.docx" style="display:none;" />
           <button class="secondary" style="padding:0.3rem 0.6rem; font-size:0.78rem;" onclick="document.getElementById('workingFileInput').click()">Load File</button>
           <button class="secondary" style="padding:0.3rem 0.6rem; font-size:0.78rem;" onclick="downloadWorkingDoc()">Download</button>
         </div>
       </div>
-      <input type="text" id="workingDocTitle" value="WORKING_DOC.md" placeholder="Document filename (e.g. SPEC.md)" style="margin-bottom:0.5rem; font-weight:600;" />
-      <textarea id="workingDocContent" class="doc-editor" placeholder="Paste or load the document everyone is actively collaborating on here. You can edit it directly anytime, or approve edits proposed by ChatGPT, Claude, or Gemini in the chat..."></textarea>
+      <div id="docTabsBar" style="display:flex; gap:0.35rem; flex-wrap:wrap; margin-bottom:0.5rem;"></div>
+      <div style="display:flex; gap:0.4rem; margin-bottom:0.4rem;">
+        <input type="text" id="workingDocTitle" value="Character Bible.md" placeholder="Tab filename" style="font-weight:600; margin-top:0;" />
+        <button class="danger" style="padding:0.3rem 0.65rem; font-size:0.78rem;" onclick="deleteCurrentWorkingDoc()">Delete Tab</button>
+      </div>
+      <input type="text" id="workingDocGdocUrl" placeholder="Paste this tab's Google Doc link here (https://google.com...) for 2-way sync" style="margin-bottom:0.5rem; font-size:0.8rem;" />
+      <textarea id="workingDocContent" class="doc-editor" placeholder="Click 'Pull GDoc' to load your Google Doc here, or type/paste directly..."></textarea>
       <div style="font-size:0.76rem; color:#8b949e; margin-top:0.4rem;">
-        Tip: Ask any AI to "propose an edit to the working doc" — an <b>Approve &amp; Apply</b> button will appear in chat before any change is made.
+        Tip: All open tabs are visible to every AI. Ask any AI to "propose an edit to [Tab Name]" for an <b>Approve &amp; Apply</b> button.
       </div>
     </div>
   </div>
@@ -189,14 +195,66 @@
     const workingDocTitle = document.getElementById("workingDocTitle");
     const workingDocContent = document.getElementById("workingDocContent");
 
+   const workingDocGdocUrl = document.getElementById("workingDocGdocUrl");
+    let workingDocs = JSON.parse(localStorage.getItem("ai_ws_docs_array_v1") || "null") || [
+      { id: "doc_1", title: "Character Bible.md", gdocUrl: "", content: "" }
+    ];
+    let activeDocId = workingDocs.at(0).id;
+
+    function getActiveDoc() { return workingDocs.find(d => d.id === activeDocId) || workingDocs.at(0); }
+
+    function saveWorkingDocs() {
+      localStorage.setItem("ai_ws_docs_array_v1", JSON.stringify(workingDocs));
+      scheduleGitHubSync();
+    }
+
+    function renderDocTabs() {
+      const bar = document.getElementById("docTabsBar");
+      if (!bar) return;
+      bar.innerHTML = "";
+      workingDocs.forEach(doc => {
+        const btn = document.createElement("button");
+        btn.textContent = doc.title;
+        btn.className = doc.id === activeDocId ? "" : "secondary";
+        btn.style.padding = "0.28rem 0.65rem";
+        btn.style.fontSize = "0.78rem";
+        btn.onclick = () => { activeDocId = doc.id; renderDocTabs(); };
+        bar.appendChild(btn);
+      });
+      const cur = getActiveDoc();
+      if (cur) {
+        workingDocTitle.value = cur.title;
+        workingDocGdocUrl.value = cur.gdocUrl || "";
+        workingDocContent.value = cur.content || "";
+      }
+    }
+
+    function addNewWorkingDoc() {
+      const newDoc = { id: "doc_" + Date.now(), title: "Doc " + (workingDocs.length + 1) + ".md", gdocUrl: "", content: "" };
+      workingDocs.push(newDoc);
+      activeDocId = newDoc.id;
+      saveWorkingDocs();
+      renderDocTabs();
+    }
+
+    function deleteCurrentWorkingDoc() {
+      if (workingDocs.length <= 1) return alert("Keep at least one working document tab open.");
+      if (!confirm("Delete tab '" + getActiveDoc().title + "'?")) return;
+      workingDocs = workingDocs.filter(d => d.id !== activeDocId);
+      activeDocId = workingDocs.at(0).id;
+      saveWorkingDocs();
+      renderDocTabs();
+    }
+
     loadSavedState();
     renderRefDocs();
+    renderDocTabs();
     renderAll();
 
     projectBrief.addEventListener("input", () => { localStorage.setItem(KEYS.BRIEF, projectBrief.value); scheduleGitHubSync(); });
-    workingDocTitle.addEventListener("input", () => { localStorage.setItem(KEYS.WORK_TITLE, workingDocTitle.value); scheduleGitHubSync(); });
-    workingDocContent.addEventListener("input", () => { localStorage.setItem(KEYS.WORK_BODY, workingDocContent.value); scheduleGitHubSync(); });
-
+    workingDocTitle.addEventListener("input", () => { getActiveDoc().title = workingDocTitle.value; saveWorkingDocs(); renderDocTabs(); });
+    workingDocGdocUrl.addEventListener("input", () => { getActiveDoc().gdocUrl = workingDocGdocUrl.value.trim(); saveWorkingDocs(); });
+    workingDocContent.addEventListener("input", () => { getActiveDoc().content = workingDocContent.value; saveWorkingDocs(); });
     ["openaiPersona", "claudePersona", "geminiPersona", "ghRepo", "ghBranch", "openaiKey", "claudeKey", "geminiKey", "ghToken", "rememberKeys"].forEach(id => {
       document.getElementById(id).addEventListener("input", saveSettingsAndSecrets);
       document.getElementById(id).addEventListener("change", saveSettingsAndSecrets);
@@ -337,16 +395,17 @@
       chatBox.scrollTop = chatBox.scrollHeight;
     }
 
-    function approveProposal(propId) {
+   function approveProposal(propId) {
       const prop = pendingProposals[propId];
       if (!prop) return;
+      const cur = getActiveDoc();
+      cur.content = prop.content;
       workingDocContent.value = prop.content;
-      localStorage.setItem(KEYS.WORK_BODY, prop.content);
       const btn = document.getElementById("btn_" + propId);
-      if (btn) { btn.textContent = "Applied to Working Document"; btn.disabled = true; btn.style.background = "#238636"; }
-      scheduleGitHubSync();
+      if (btn) { btn.textContent = "Applied to " + cur.title; btn.disabled = true; btn.style.background = "#238636"; }
+      saveWorkingDocs();
       pushToGoogleDoc(false);
-      statusText.textContent = "Approved & applied " + prop.speaker + "'s edit to " + workingDocTitle.value + ".";
+      statusText.textContent = "Approved & applied " + prop.speaker + "'s edit to " + cur.title + ".";
     }
 
     function addMessage(css, speaker, text) {
@@ -366,9 +425,11 @@
       let sys = "You are " + agentName + " in a shared collaborative workspace with the User, ChatGPT, Claude, and Gemini.\nYour persona: " + persona + "\nEveryone sees every message in the chat, all active Reference Documents, and the Live Shared Working Document. Note that ChatGPT and the User collaborate closely.";
       if (brief) sys += "\n\n=== PINNED PROJECT BRIEF & DECISIONS ===\n" + brief + "\n=======================================";
       if (activeRefs.length > 0) sys += "\n\n=== REFERENCE DOCUMENTS (READ-ONLY CONTEXT) ===\n" + activeRefs.map(d => "--- FILE: " + d.name + " ---\n" + d.content.slice(0, 12000)).join("\n\n") + "\n===============================================";
-      sys += "\n\n=== LIVE SHARED WORKING DOCUMENT (" + workTitle + ") ===\n" + (workBody || "(Currently empty)") + "\n===================================================";
-      sys += "\n\nCOLLABORATIVE EDITING RULE: You CANNOT directly overwrite the Live Shared Working Document without User approval. Whenever you want to create or update the working document, explain your reasoning briefly in 1-2 sentences, then output the COMPLETE updated document text wrapped strictly inside <PROPOSED_DOC> and </PROPOSED_DOC> tags so the User can review and click Approve.";
-      return sys;
+     sys += "\n\n=== LIVE SHARED WORKING DOCUMENTS (ALL OPEN TABS) ===\n" +
+        workingDocs.map(d => "--- TAB: " + d.title + " ---\n" + (d.content || "(Empty)")).join("\n\n") +
+        "\n====================================================";
+      sys += "\n\nCOLLABORATIVE EDITING RULE: You CANNOT directly overwrite a working document without User approval. Whenever you want to create or update a working document, state the exact tab name, explain your reasoning in 1-2 sentences, and output the COMPLETE updated document text wrapped strictly inside <PROPOSED_DOC> and </PROPOSED_DOC> tags.";
+     return sys;
     }
 
     function formatTranscriptForPrompt(agentName) {
@@ -620,22 +681,29 @@
       });
     })();
 
+function extractGoogleDocId(urlStr) {
+      const m = (urlStr || "").match(/\/d\/([a-zA-Z0-9_-]+)/);
+      return m ? m.at(1) : null;
+    }
+
     async function pullFromGoogleDoc() {
       const url = document.getElementById("gdocUrl").value.trim();
       const secret = document.getElementById("gdocSecret").value.trim();
-      if (!url || !secret) return alert("Enter your Google Apps Script Web App URL and Secret Key in Settings first.");
+      const docId = extractGoogleDocId(workingDocGdocUrl.value);
+      if (!url || !secret) return alert("Enter your Apps Script Web App URL and Secret Key in Settings first.");
+      if (!docId) return alert("Paste your Google Doc link into the 'Paste this tab's Google Doc link here' box above the editor first.");
       statusText.textContent = "Pulling latest text from Google Doc...";
       try {
-        const res = await fetch(url + "?key=" + encodeURIComponent(secret));
+        const res = await fetch(url + "?key=" + encodeURIComponent(secret) + "&docId=" + encodeURIComponent(docId));
         const text = await res.text();
         if (text === "Unauthorized") throw new Error("Invalid Secret Key.");
         const data = JSON.parse(text);
-        workingDocTitle.value = (data.title || "GOOGLE_DOC") + ".md";
-        workingDocContent.value = data.content || "";
-        localStorage.setItem(KEYS.WORK_TITLE, workingDocTitle.value);
-        localStorage.setItem(KEYS.WORK_BODY, workingDocContent.value);
-        scheduleGitHubSync();
-        statusText.textContent = "Pulled latest content from Google Doc (" + data.title + ").";
+        const cur = getActiveDoc();
+        cur.title = (data.title || "GOOGLE_DOC") + ".md";
+        cur.content = data.content || "";
+        renderDocTabs();
+        saveWorkingDocs();
+        statusText.textContent = "Pulled '" + data.title + "' from Google Docs!";
       } catch (err) {
         statusText.textContent = "Google Doc Pull Error: " + err.message;
       }
@@ -644,20 +712,21 @@
     async function pushToGoogleDoc(manual = false) {
       const url = document.getElementById("gdocUrl").value.trim();
       const secret = document.getElementById("gdocSecret").value.trim();
-      if (!url || !secret) {
-        if (manual) alert("Enter your Google Apps Script Web App URL and Secret Key in Settings first.");
+      const docId = extractGoogleDocId(workingDocGdocUrl.value);
+      if (!url || !secret || !docId) {
+        if (manual) alert("Make sure your Apps Script URL, Secret Key, and this tab's Google Doc link are filled in.");
         return;
       }
-      statusText.textContent = "Pushing working document to Google Doc...";
+      statusText.textContent = "Pushing changes to Google Doc...";
       try {
         const res = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body: JSON.stringify({ key: secret, content: workingDocContent.value })
+          body: JSON.stringify({ key: secret, docId: docId, content: workingDocContent.value })
         });
         const text = await res.text();
         if (text === "Unauthorized") throw new Error("Invalid Secret Key.");
-        statusText.textContent = "Saved to live Google Doc at " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) + ".";
+        statusText.textContent = "Synced to live Google Doc at " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) + ".";
       } catch (err) {
         statusText.textContent = "Google Doc Push Error: " + err.message;
       }
