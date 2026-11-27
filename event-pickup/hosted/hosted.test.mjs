@@ -78,6 +78,8 @@ test("hosted OAuth authorizes one owner, consumes the pairing code once and expo
     const page = await get(authorize);
     const html = await page.text();
     assert.equal(page.status, 200, html);
+    assert.ok(page.headers.get("content-security-policy").split("; ").includes(
+      "form-action 'self' https://chatgpt.com"));
     const handle = html.match(/name="handle" value="([^"]+)"/)?.[1];
     assert.ok(handle);
     assert.match(html, /One-time pairing code/);
@@ -93,7 +95,7 @@ test("hosted OAuth authorizes one owner, consumes the pairing code once and expo
   assert.match(await stale.text(), /connection form was refreshed/);
   assert.ok(stale.headers.getSetCookie().length > 0);
   const allowed = await confirm(syntheticCode);
-  assert.equal(allowed.status, 302, await allowed.clone().text());
+  assert.equal(allowed.status, 303, await allowed.clone().text());
   const target = new URL(allowed.headers.get("location"));
   assert.equal(target.pathname, "/connector_platform_oauth_redirect");
   assert.equal(target.searchParams.get("state"), "one-test-state");

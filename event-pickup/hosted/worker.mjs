@@ -152,7 +152,7 @@ async function renderAuthorization(request, oauth, notice = "") {
   const { handle, headers } = await oauth.beginConsent(parsed);
   headers.set("Content-Type", "text/html; charset=utf-8");
   headers.set("Cache-Control", "no-store");
-  headers.set("Content-Security-Policy", "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
+  headers.set("Content-Security-Policy", "default-src 'none'; form-action 'self' https://chatgpt.com; frame-ancestors 'none'; base-uri 'none'");
   return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <title>Connect AI Group Room Pilot</title><main><h1>Connect AI Group Room Pilot</h1>
 <p>Allow ChatGPT (chatgpt.com) to subscribe to inbox events for the Group Room test branch. This connection cannot edit GitHub or your documents.</p>
@@ -172,7 +172,7 @@ async function authorize(request, env) {
   const handle = String(form.get("handle") ?? "");
   if (form.get("decision") !== "approve") {
     const denied = await oauth.denyConsent(request, handle);
-    return new Response(null, { status: 302, headers: denied.headers });
+    return new Response(null, { status: 303, headers: denied.headers });
   }
   const code = String(form.get("code") ?? "").trim().toLowerCase().replaceAll("-", "");
   if (!/^[a-f0-9]{32}$/.test(code)) return new Response("Enter the one-time code from the pilot setup.", { status: 403 });
@@ -212,7 +212,7 @@ async function authorize(request, env) {
     throw err;
   }
   approved.headers.set("Location", grant.redirectTo);
-  return new Response(null, { status: 302, headers: approved.headers });
+  return new Response(null, { status: 303, headers: approved.headers });
 }
 
 async function mcp(request, env, ctx) {
