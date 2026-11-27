@@ -214,7 +214,7 @@
 
     // Live working doc file loader
     document.getElementById("workingFileInput").addEventListener("change", async (e) => {
-      const file = e.target.files;
+      const file = e.target.files[0];
       if (!file) return;
       workingDocTitle.value = file.name.replace(/\.docx$/i, ".md");
       workingDocContent.value = await extractFileText(file);
