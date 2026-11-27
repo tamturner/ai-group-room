@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { createHash } from "node:crypto";
-import { OAuthProvider, insufficientScope } from "@cloudflare/workers-oauth-provider";
+import { AuthorizationError, OAuthProvider, insufficientScope } from "@cloudflare/workers-oauth-provider";
 import { equalSecret, openRelay, RelayError } from "../relay.mjs";
 import { verifyGitHubPush } from "./github.mjs";
 
@@ -146,23 +146,26 @@ function setupPage(origin) {
   });
 }
 
-async function authorize(request, env) {
-  const oauth = env.OAUTH_PROVIDER;
-  if (request.method === "GET") {
-    const parsed = await oauth.parseAuthRequest(request);
-    if (!isChatGPTRedirect(parsed.redirectUri) || parsed.codeChallengeMethod !== "S256") return new Response("Unsupported ChatGPT client.", { status: 400 });
-    const { handle, headers } = await oauth.beginConsent(parsed);
-    headers.set("Content-Type", "text/html; charset=utf-8");
-    headers.set("Cache-Control", "no-store");
-    headers.set("Content-Security-Policy", "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
-    return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+async function renderAuthorization(request, oauth, notice = "") {
+  const parsed = await oauth.parseAuthRequest(request);
+  if (!isChatGPTRedirect(parsed.redirectUri) || parsed.codeChallengeMethod !== "S256") return new Response("Unsupported ChatGPT client.", { status: 400 });
+  const { handle, headers } = await oauth.beginConsent(parsed);
+  headers.set("Content-Type", "text/html; charset=utf-8");
+  headers.set("Cache-Control", "no-store");
+  headers.set("Content-Security-Policy", "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
+  return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <title>Connect AI Group Room Pilot</title><main><h1>Connect AI Group Room Pilot</h1>
 <p>Allow ChatGPT (chatgpt.com) to subscribe to inbox events for the Group Room test branch. This connection cannot edit GitHub or your documents.</p>
+${notice ? "<p role=\"status\">" + escapeHTML(notice) + "</p>" : ""}
 <form method="post"><input type="hidden" name="handle" value="${escapeHTML(handle)}">
 <label>One-time pairing code <input name="code" type="password" autocomplete="off" required></label>
 <button name="decision" value="approve">Allow</button><button name="decision" value="deny" formnovalidate>Deny</button></form></main></html>`,
-    { headers });
-  }
+  { headers });
+}
+
+async function authorize(request, env) {
+  const oauth = env.OAUTH_PROVIDER;
+  if (request.method === "GET") return renderAuthorization(request, oauth);
   if (request.method !== "POST") return new Response(null, { status: 405 });
   if (request.headers.get("origin") !== env.ROOM_ORIGIN) return new Response(null, { status: 403 });
   const form = await request.formData();
@@ -179,7 +182,16 @@ async function authorize(request, env) {
   if (!Number.isFinite(expiresAt) || Date.now() >= expiresAt) {
     return new Response("This pairing code has expired.", { status: 403 });
   }
-  const approved = await oauth.approveConsent(request, handle, { scope: [scope] });
+  let approved;
+  try {
+    approved = await oauth.approveConsent(request, handle, { scope: [scope] });
+  } catch (err) {
+    if (!(err instanceof AuthorizationError) || err.code !== "invalid_request") throw err;
+    // The consent form has its own short-lived, browser-bound transaction.
+    // Renew it from the original, validated OAuth parameters before reserving the pairing code.
+    return renderAuthorization(new Request(request.url, { headers: request.headers }), oauth,
+      "The connection form was refreshed. Enter the same pairing code again and click Allow.");
+  }
   if (!isChatGPTRedirect(approved.request.redirectUri)) {
     return new Response("Open Connect again in ChatGPT to start a new authorization.", { status: 400 });
   }
@@ -256,7 +268,13 @@ function workerHandler(env) {
         if (path === "/healthz" && request.method === "GET") return Response.json({ status: "ready", service: "group-room-pickup-pilot" });
         if (path === "/authorize") {
           try { return await authorize(request, env); }
-          catch { return new Response("Restart the ChatGPT connection and try again.", { status: 400 }); }
+          catch (err) {
+            if (!(err instanceof AuthorizationError)) {
+              console.error("Group Room OAuth failed:", err?.name ?? "unknown");
+            }
+            return new Response("Open the AI Group Room Pickup Pilot in ChatGPT and select Connect to start a fresh sign-in.",
+              { status: err instanceof AuthorizationError ? 400 : 503, headers: { "Cache-Control": "no-store" } });
+          }
         }
         if (path !== "/github" || request.method !== "POST") return new Response(null, { status: 404 });
         let push;

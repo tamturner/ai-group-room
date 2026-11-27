@@ -16,7 +16,7 @@ const settings = {
 };
 const syntheticCode = "a".repeat(32);
 const hash = value => createHash("sha256").update(value).digest("hex");
-const redirect = "https://chatgpt.com/connector/oauth/test-client";
+const redirect = "https://chatgpt.com/connector_platform_oauth_redirect";
 const version = "2026-07-28";
 
 test("hosted OAuth authorizes one owner, consumes the pairing code once and exposes MCP Events", async t => {
@@ -86,10 +86,16 @@ test("hosted OAuth authorizes one owner, consumes the pairing code once and expo
   }
   assert.equal((await confirm(syntheticCode, "https://unrelated.example")).status, 403);
   assert.equal((await confirm("c".repeat(32))).status, 403);
+  const stale = await post(authorize, new URLSearchParams({
+    handle: "expired-form", decision: "approve", code: syntheticCode
+  }), { origin });
+  assert.equal(stale.status, 200);
+  assert.match(await stale.text(), /connection form was refreshed/);
+  assert.ok(stale.headers.getSetCookie().length > 0);
   const allowed = await confirm(syntheticCode);
   assert.equal(allowed.status, 302, await allowed.clone().text());
   const target = new URL(allowed.headers.get("location"));
-  assert.equal(target.pathname, "/connector/oauth/test-client");
+  assert.equal(target.pathname, "/connector_platform_oauth_redirect");
   assert.equal(target.searchParams.get("state"), "one-test-state");
   const reused = await confirm(syntheticCode);
   assert.equal(reused.status, 403);
