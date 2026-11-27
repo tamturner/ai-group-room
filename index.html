@@ -192,10 +192,19 @@
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendHumanMessage(); }
     });
 
+    async function extractFileText(file) {
+      if (file.name.toLowerCase().endsWith(".docx")) {
+        const arrayBuffer = await file.arrayBuffer();
+        const result = await mammoth.extractRawText({ arrayBuffer });
+        return result.value;
+      }
+      return await file.text();
+    }
+
     // Reference file uploader
     document.getElementById("refFileInput").addEventListener("change", async (e) => {
       for (const file of e.target.files) {
-        const text = await file.text();
+        const text = await extractFileText(file);
         refDocs.push({ id: Date.now() + Math.random(), name: file.name, content: text, active: true });
       }
       e.target.value = "";
@@ -207,8 +216,8 @@
     document.getElementById("workingFileInput").addEventListener("change", async (e) => {
       const file = e.target.files;
       if (!file) return;
-      workingDocTitle.value = file.name;
-      workingDocContent.value = await file.text();
+      workingDocTitle.value = file.name.replace(/\.docx$/i, ".md");
+      workingDocContent.value = await extractFileText(file);
       localStorage.setItem(KEYS.WORK_TITLE, workingDocTitle.value);
       localStorage.setItem(KEYS.WORK_BODY, workingDocContent.value);
       scheduleGitHubSync();
