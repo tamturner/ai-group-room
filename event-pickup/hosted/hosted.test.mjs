@@ -37,6 +37,19 @@ test("hosted OAuth authorizes one owner, consumes the pairing code once and expo
     token ? { authorization: "Bearer " + token } : {});
 
   assert.equal((await get("/healthz")).status, 200);
+  const setup = await get("/");
+  assert.equal(setup.status, 200);
+  assert.match(setup.headers.get("content-type"), /text\/html/);
+  assert.ok((await setup.text()).includes(origin + "/mcp"));
+  const browserNavigation = await mf.dispatchFetch(origin + "/mcp", {
+    redirect: "manual", headers: { accept: "text/html,application/xhtml+xml,*/*;q=0.8" }
+  });
+  assert.equal(browserNavigation.status, 303);
+  assert.equal(browserNavigation.headers.get("location"), origin + "/");
+  assert.equal((await get("/mcp")).status, 401);
+  assert.equal((await mf.dispatchFetch(origin + "/mcp", {
+    headers: { accept: "application/json,text/event-stream" }, redirect: "manual"
+  })).status, 401);
   assert.equal((await postJSON("/github", { files: [] })).status, 401);
   const unauthorized = await mcp("server/discover");
   assert.equal(unauthorized.status, 401);

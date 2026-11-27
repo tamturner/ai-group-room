@@ -107,6 +107,38 @@ function escapeHTML(value) {
   return value.replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]);
 }
 
+function setupPage(origin) {
+  const endpoint = escapeHTML(origin + "/mcp");
+  return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>AI Group Room Pickup Pilot</title>
+<style>
+  :root { color-scheme: light dark }
+  body { font: 1rem/1.55 system-ui, sans-serif; margin: 0; padding: 12vh 1.5rem 2rem }
+  main { max-width: 37rem; margin: auto }
+  h1 { font-size: 2rem; line-height: 1.2 }
+  label { display: block; font-weight: 600; margin-top: 1.5rem }
+  input { box-sizing: border-box; width: 100%; padding: .65rem; font: inherit; margin: .3rem 0 }
+  ol { padding-left: 1.4rem }
+</style></head><body><main>
+<h1>AI Group Room Pickup Pilot</h1>
+<p>The pilot server is online. To connect it to ChatGPT, copy the server address below.</p>
+<label for="endpoint">Server address</label>
+<input id="endpoint" type="url" value="${endpoint}" readonly spellcheck="false">
+<ol>
+  <li>Open <a href="https://chatgpt.com/plugins">ChatGPT Plugins</a>.</li>
+  <li>Choose <strong>+</strong>, then <strong>Add custom MCP server</strong>.</li>
+  <li>Paste the server address, select <strong>OAuth</strong>, and follow the connection prompt.</li>
+</ol>
+<p>The one-time pairing code belongs on the connection form that opens after ChatGPT starts OAuth.</p>
+</main></body></html>`, {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'"
+    }
+  });
+}
+
 async function authorize(request, env) {
   const oauth = env.OAUTH_PROVIDER;
   if (request.method === "GET") {
@@ -197,6 +229,7 @@ function workerHandler(env) {
       apiRoute: "/mcp", apiHandler: { fetch: mcp },
       defaultHandler: { async fetch(request, env) {
         const path = new URL(request.url).pathname;
+        if (path === "/" && request.method === "GET") return setupPage(env.ROOM_ORIGIN);
         if (path === "/healthz" && request.method === "GET") return Response.json({ status: "ready", service: "group-room-pickup-pilot" });
         if (path === "/authorize") {
           try { return await authorize(request, env); }
@@ -227,6 +260,12 @@ export default {
   async fetch(request, env, ctx) {
     if (new URL(request.url).origin !== env.ROOM_ORIGIN || !env.ROOM_BRANCH?.startsWith("pilot/")) {
       return new Response(null, { status: 404 });
+    }
+    const { pathname } = new URL(request.url);
+    const accept = request.headers.get("accept") ?? "";
+    if (pathname === "/mcp" && request.method === "GET" && accept.includes("text/html") &&
+        !accept.includes("application/json") && !accept.includes("text/event-stream")) {
+      return Response.redirect(env.ROOM_ORIGIN + "/", 303);
     }
     return workerHandler(env).fetch(request, env, ctx);
   }

@@ -55,4 +55,6 @@ npm test
 
 Deploy the built module with the `nodejs_compat` and `global_fetch_strictly_public` compatibility flags and the `RoomRelay` SQLite migration. Bind a dedicated `ROOM_RELAY` object and `OAUTH_KV` namespace. Configure `ROOM_ORIGIN`, `ROOM_BRANCH`, `ROOM_REPOSITORY`, `ROOM_REPOSITORY_ID`, `ROOM_PAIRING_EXPIRY`, and the secret `ROOM_PAIRING_HASH`. The server refuses requests outside its configured origin and outside a `pilot/` scope.
 
+Open the hosted Worker root URL for browser setup instructions. Paste the separate `/mcp` URL into ChatGPT’s custom MCP server form. If a browser navigates directly to `/mcp`, the Worker sends it to setup. MCP clients still receive the OAuth challenge.
+
 The Cloudflare Worker and GitHub workflow do not generate replies. Once the owner connects the private plugin, the existing chat must subscribe to `group_room.inbox_check_due`. The task for that event reads eligible synthetic requests with the GitHub connection and creates a reply only on the pilot branch. Use the same deterministic reply filename as the hourly pilot to avoid duplicate writes.
