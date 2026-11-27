@@ -151,7 +151,7 @@
       </div>
     </div>
   </div>
-  <script>
+ <script>
     const KEYS = {
       TRANSCRIPT: "ai_ws_transcript_v3",
       BRIEF: "ai_ws_brief_v3",
@@ -201,7 +201,6 @@
       return await file.text();
     }
 
-    // Reference file uploader
     document.getElementById("refFileInput").addEventListener("change", async (e) => {
       for (const file of e.target.files) {
         const text = await extractFileText(file);
@@ -212,9 +211,8 @@
       renderRefDocs();
     });
 
-    // Live working doc file loader
     document.getElementById("workingFileInput").addEventListener("change", async (e) => {
-      const file = e.target.files[0];
+      const file = e.target.files.item(0);
       if (!file) return;
       workingDocTitle.value = file.name.replace(/\.docx$/i, ".md");
       workingDocContent.value = await extractFileText(file);
@@ -233,7 +231,7 @@
       refDocs.forEach((doc, idx) => {
         const div = document.createElement("div");
         div.className = "ref-item";
-        div.innerHTML = `<div class="ref-left"><input type="checkbox" ${doc.active ? "checked" : ""} onchange="toggleRefDoc(${idx})" /><span><b>${escapeHtml(doc.name)}</b> (${doc.content.length.toLocaleString()} chars)</span></div><button class="danger" style="padding:0.2rem 0.5rem; font-size:0.75rem;" onclick="removeRefDoc(${idx})">Remove</button>`;
+        div.innerHTML = '<div class="ref-left"><input type="checkbox" ' + (doc.active ? "checked" : "") + ' onchange="toggleRefDoc(' + idx + ')" /><span><b>' + escapeHtml(doc.name) + '</b> (' + doc.content.length.toLocaleString() + ' chars)</span></div><button class="danger" style="padding:0.2rem 0.5rem; font-size:0.75rem;" onclick="removeRefDoc(' + idx + ')">Remove</button>';
         list.appendChild(div);
       });
     }
@@ -252,7 +250,6 @@
       if (settings.ghRepo) document.getElementById("ghRepo").value = settings.ghRepo;
       if (settings.ghBranch) document.getElementById("ghBranch").value = settings.ghBranch;
       document.getElementById("rememberKeys").checked = !!settings.rememberKeys;
-
       if (settings.rememberKeys) {
         const secrets = JSON.parse(localStorage.getItem(KEYS.SECRETS) || "{}");
         if (secrets.openaiKey) document.getElementById("openaiKey").value = secrets.openaiKey;
@@ -288,16 +285,15 @@
 
     function updateSyncBadge() {
       const token = document.getElementById("ghToken").value.trim(), repo = document.getElementById("ghRepo").value.trim();
-      if (token && repo) { syncBadge.textContent = `GitHub Sync: Ready (${repo})`; syncBadge.className = "sync-badge sync-ok"; }
+      if (token && repo) { syncBadge.textContent = "GitHub Sync: Ready (" + repo + ")"; syncBadge.className = "sync-badge sync-ok"; }
       else { syncBadge.textContent = "GitHub Sync: Not configured"; syncBadge.className = "sync-badge"; }
     }
-
     function saveTranscript() { localStorage.setItem(KEYS.TRANSCRIPT, JSON.stringify(transcript)); scheduleGitHubSync(); }
 
     function renderAll() {
       chatBox.innerHTML = "";
       if (transcript.length === 0) {
-        chatBox.innerHTML = `<div style="color:#8b949e; text-align:center; margin:auto;">Upload reference docs or paste into the Working Document on the right, then start chatting...</div>`;
+        chatBox.innerHTML = '<div style="color:#8b949e; text-align:center; margin:auto;">Upload reference docs or paste into the Working Document on the right, then start chatting...</div>';
         return;
       }
       transcript.forEach(msg => appendMessageDOM(msg));
@@ -307,29 +303,21 @@
     function parseProposal(text) {
       const match = text.match(/<PROPOSED_DOC>([\s\S]*?)<\/PROPOSED_DOC>/i);
       if (!match) return { cleanText: text, proposedContent: null };
-      const cleanText = text.replace(match, "").trim();
-      return { cleanText, proposedContent: match.trim() };
+      return { cleanText: text.replace(match.at(0), "").trim(), proposedContent: match.at(1).trim() };
     }
 
     function appendMessageDOM(msg) {
       if (transcript.length === 1 && chatBox.firstChild?.style?.textAlign === "center") chatBox.innerHTML = "";
       const { cleanText, proposedContent } = parseProposal(msg.text);
       const div = document.createElement("div");
-      div.className = `msg ${msg.css}`;
-
-      let html = `<div class="sender"><span>${msg.speaker}</span><span style="font-weight:normal;opacity:0.7;">${msg.time}</span></div>`;
-      if (cleanText) html += `<div>${escapeHtml(cleanText).replace(/\n/g, "<br>")}</div>`;
-
+      div.className = "msg " + msg.css;
+      let html = '<div class="sender"><span>' + msg.speaker + '</span><span style="font-weight:normal;opacity:0.7;">' + msg.time + '</span></div>';
+      if (cleanText) html += '<div>' + escapeHtml(cleanText).replace(/\n/g, "<br>") + '</div>';
       if (proposedContent !== null) {
         const propId = "prop_" + Math.random().toString(36).slice(2, 9);
         pendingProposals[propId] = { speaker: msg.speaker, content: proposedContent };
-        html += `<div class="proposal-box">
-          <div class="proposal-header">PROPOSED UPDATE TO: ${escapeHtml(workingDocTitle.value)} (From ${msg.speaker})</div>
-          <div class="proposal-preview">${escapeHtml(proposedContent)}</div>
-          <button class="approve-btn" id="btn_${propId}" onclick="approveProposal('${propId}')">Approve &amp; Apply to Working Doc</button>
-        </div>`;
+        html += '<div class="proposal-box"><div class="proposal-header">PROPOSED UPDATE TO: ' + escapeHtml(workingDocTitle.value) + ' (From ' + msg.speaker + ')</div><div class="proposal-preview">' + escapeHtml(proposedContent) + '</div><button class="approve-btn" id="btn_' + propId + '" onclick="approveProposal(\'' + propId + '\')">Approve &amp; Apply to Working Doc</button></div>';
       }
-
       div.innerHTML = html;
       chatBox.appendChild(div);
       chatBox.scrollTop = chatBox.scrollHeight;
@@ -343,7 +331,7 @@
       const btn = document.getElementById("btn_" + propId);
       if (btn) { btn.textContent = "Applied to Working Document"; btn.disabled = true; btn.style.background = "#238636"; }
       scheduleGitHubSync();
-      statusText.textContent = `Approved & applied ${prop.speaker}'s edit to ${workingDocTitle.value}.`;
+      statusText.textContent = "Approved & applied " + prop.speaker + "'s edit to " + workingDocTitle.value + ".";
     }
 
     function addMessage(css, speaker, text) {
@@ -353,225 +341,217 @@
       saveTranscript();
       appendMessageDOM(entry);
     }
-function escapeHtml(str) { return str.replace(/[&<>"']/g, m => ({ "&": "&", "<": "<", ">": ">", '"': """, "'": "'" }[m])); }
-function buildSystemPrompt(agentName, persona) {
-const brief = projectBrief.value.trim();
-const activeRefs = refDocs.filter(d => d.active);
-const workTitle = workingDocTitle.value.trim() || "WORKING_DOC.md";
-const workBody = workingDocContent.value.trim();
-let sys = You are ${agentName} in a shared collaborative workspace with the User, ChatGPT, Claude, and Gemini.\nYour persona: ${persona}\nEveryone sees every message in the chat, all active Reference Documents, and the Live Shared Working Document. Note that ChatGPT and the User collaborate closely.;
-if (brief) {
-sys += \n\n=== PINNED PROJECT BRIEF & DECISIONS ===\n${brief}\n=======================================;
-}
-if (activeRefs.length > 0) {
-sys += \n\n=== REFERENCE DOCUMENTS (READ-ONLY CONTEXT) ===\n +
-activeRefs.map(d => --- FILE: ${d.name} ---\n${d.content.slice(0, 12000)}).join("\n\n") +
-\n===============================================;
-}
-sys += \n\n=== LIVE SHARED WORKING DOCUMENT (${workTitle}) ===\n${workBody || "(Currently empty)"}\n===================================================;
-sys += \n\nCOLLABORATIVE EDITING RULE: You CANNOT directly overwrite the Live Shared Working Document without User approval. Whenever you want to create or update the working document, explain your reasoning briefly in 1-2 sentences, then output the COMPLETE updated document text wrapped strictly inside <PROPOSED_DOC> and </PROPOSED_DOC> tags so the User can review and click Approve.;
-return sys;
-}
-function formatTranscriptForPrompt(agentName) {
-const history = transcript.slice(-40).map(m => ${m.speaker}: ${m.text}).join("\n\n");
-return Shared room transcript:\n${history || "(Empty room — greet the User or inspect the working document)"}\n\nInstructions for ${agentName}: Respond naturally in 2-4 concise sentences (unless proposing a document update inside <PROPOSED_DOC>...</PROPOSED_DOC>). If you have nothing meaningful to add right now, reply strictly with the word PASS.;
-}
-async function callChatGPT(promptText) {
-const key = document.getElementById("openaiKey").value.trim();
-if (!key) throw new Error("Missing OpenAI API key.");
-const res = await fetch("openai.com", {
-method: "POST",
-headers: { "Content-Type": "application/json", "Authorization": Bearer ${key} },
-body: JSON.stringify({
-model: "gpt-4o-mini",
-max_tokens: 1500,
-messages: [{ role: "system", content: buildSystemPrompt("ChatGPT", document.getElementById("openaiPersona").value) }, { role: "user", content: promptText }]
-})
-});
-const data = await res.json();
-if (!res.ok) throw new Error(ChatGPT: ${data.error?.message || "Error"});
-return data.choices.message.content.trim();
-}
-async function callClaude(promptText) {
-const key = document.getElementById("claudeKey").value.trim();
-if (!key) throw new Error("Missing Anthropic API key.");
-const res = await fetch("anthropic.com", {
-method: "POST",
-headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-body: JSON.stringify({
-model: "claude-sonnet-4-20250514",
-max_tokens: 1500,
-system: buildSystemPrompt("Claude", document.getElementById("claudePersona").value),
-messages: [{ role: "user", content: promptText }]
-})
-});
-const data = await res.json();
-if (!res.ok) throw new Error(Claude: ${data.error?.message || "Error"});
-return data.content.text.trim();
-}
-async function callGemini(promptText) {
-const key = document.getElementById("geminiKey").value.trim();
-if (!key) throw new Error("Missing Gemini API key.");
-const res = await fetch(https://googleapis.com{key}, {
-method: "POST",
-headers: { "Content-Type": "application/json" },
-body: JSON.stringify({
-systemInstruction: { parts: [{ text: buildSystemPrompt("Gemini", document.getElementById("geminiPersona").value) }] },
-contents: [{ role: "user", parts: [{ text: promptText }] }],
-generationConfig: { maxOutputTokens: 1500 }
-})
-});
-const data = await res.json();
-if (!res.ok) throw new Error(Gemini: ${data.error?.message || "Error"});
-return data.candidates.content.parts.text.trim();
-}
-function setControlsState(running) {
-isRunning = running;
-document.getElementById("stopBtn").disabled = !running;
-document.getElementById("continueBtn").disabled = running;
-document.getElementById("chatgptFirstBtn").disabled = running;
-}
-function stopLoop() { abortRequested = true; statusText.textContent = "Pausing after current turn..."; }
-async function sendHumanMessage() {
-const text = userInput.value.trim();
-if (!text) return;
-abortRequested = true;
-userInput.value = "";
-addMessage("human", "You", text);
-setTimeout(() => { if (!isRunning) runOpenFloor(); }, 200);
-}
-async function triggerSpecificAI(name) {
-if (isRunning) return;
-setControlsState(true);
-abortRequested = false;
-try {
-statusText.textContent = ${name} is thinking...;
-const prompt = formatTranscriptForPrompt(name).replace("If you have nothing meaningful to add right now, reply strictly with the word PASS.", "Kick off or advance the discussion directly.");
-const reply = await callChatGPT(prompt);
-addMessage("chatgpt", "ChatGPT", reply);
-await runOpenFloor(true);
-} catch (err) { statusText.textContent = Error: ${err.message}; }
-finally { setControlsState(false); }
-}
-function detectAddressedAgent(text, agents, currentSpeaker) {
-const lower = text.toLowerCase();
-const mentioned = agents.filter(a => a.name !== currentSpeaker && lower.includes(a.name.toLowerCase()));
-return mentioned.length === 1 ? mentioned : null;
-}
-async function runOpenFloor(skipSetup = false) {
-if (isRunning && !skipSetup) return;
-setControlsState(true);
-abortRequested = false;
-const agents = [
-{ name: "ChatGPT", css: "chatgpt", fn: callChatGPT },
-{ name: "Claude", css: "claude", fn: callClaude },
-{ name: "Gemini", css: "gemini", fn: callGemini }
-];
-try {
-for (let round = 0; round < 3; round++) {
-let someoneSpoke = false;
-const lastMsg = transcript[transcript.length - 1], lastSpeaker = lastMsg?.speaker;
-const target = lastMsg ? detectAddressedAgent(lastMsg.text, agents, lastSpeaker) : null;
-let order;
-if (target) {
-const rest = agents.filter(a => a.name !== target.name && a.name !== lastSpeaker);
-order = [target, ...rest];
-} else {
-const others = agents.filter(a => a.name !== lastSpeaker && a.name !== "ChatGPT").sort(() => Math.random() - 0.5);
-order = lastSpeaker === "ChatGPT" ? others : [agents, ...others];
-}
-for (const agent of order) {
-if (abortRequested) break;
-const isTargeted = target && agent.name === target.name;
-statusText.textContent = isTargeted ? ${agent.name} was addressed and is replying... : Checking if ${agent.name} wants to chime in...;
-let prompt = formatTranscriptForPrompt(agent.name);
-if (isTargeted) prompt = prompt.replace("If you have nothing meaningful to add right now, reply strictly with the word PASS.", "You were just directly addressed—answer directly.");
-const reply = await agent.fn(prompt);
-if (abortRequested) break;
-if (reply.toUpperCase() !== "PASS" && reply.toUpperCase() !== "PASS.") {
-addMessage(agent.css, agent.name, reply);
-someoneSpoke = true;
-if (detectAddressedAgent(reply, agents, agent.name)) break;
-}
-}
-if (abortRequested || !someoneSpoke) break;
-}
-statusText.textContent = abortRequested ? "Paused for your input." : "Room is waiting for you.";
-} catch (err) { statusText.textContent = Error: ${err.message}; }
-finally { setControlsState(false); abortRequested = false; }
-}
-function buildTranscriptMarkdown() {
-const brief = projectBrief.value.trim();
-let md = # AI Group Room Transcript\nLast Updated: ${new Date().toLocaleString()}\n\n;
-if (brief) md += ## Pinned Project Brief & Decisions\n${brief}\n\n---\n\n;
-md += ## Conversation Log\n\n + transcript.map(m => ### ${m.speaker} (${m.time})\n${m.text}).join("\n\n");
-return md;
-}
-function downloadTranscript() {
-const blob = new Blob([buildTranscriptMarkdown()], { type: "text/markdown" });
-const url = URL.createObjectURL(blob);
-const a = document.createElement("a");
-a.href = url; a.download = ai-roundtable-${new Date().toISOString().slice(0, 10)}.md; a.click();
-URL.revokeObjectURL(url);
-}
-function downloadWorkingDoc() {
-const title = workingDocTitle.value.trim() || "WORKING_DOC.md";
-const blob = new Blob([workingDocContent.value], { type: "text/plain" });
-const url = URL.createObjectURL(blob);
-const a = document.createElement("a");
-a.href = url; a.download = title; a.click();
-URL.revokeObjectURL(url);
-}
-function scheduleGitHubSync() {
-const token = document.getElementById("ghToken").value.trim(), repo = document.getElementById("ghRepo").value.trim();
-if (!token || !repo) return;
-clearTimeout(syncTimer);
-syncBadge.textContent = "GitHub Sync: Queued..."; syncBadge.className = "sync-badge";
-syncTimer = setTimeout(() => syncAllToGitHub(false), 2500);
-}
-function utf8ToBase64(str) {
-const bytes = new TextEncoder().encode(str);
-let bin = "";
-bytes.forEach(b => bin += String.fromCharCode(b));
-return btoa(bin);
-}
-async function commitSingleFile(repo, branch, path, contentStr, message, headers) {
-const apiUrl = https://github.com{repo}/contents/${path};
-let sha = null;
-const getRes = await fetch(${apiUrl}?ref=${encodeURIComponent(branch)}, { headers });
-if (getRes.ok) { const existing = await getRes.json(); sha = existing.sha; }
-else if (getRes.status !== 404) { const errData = await getRes.json(); throw new Error(errData.message || HTTP ${getRes.status}); }
-const payload = { message, content: utf8ToBase64(contentStr), branch };
-if (sha) payload.sha = sha;
-const putRes = await fetch(apiUrl, { method: "PUT", headers, body: JSON.stringify(payload) });
-if (!putRes.ok) { const errData = await putRes.json(); throw new Error(errData.message || HTTP ${putRes.status}); }
-}
-async function syncAllToGitHub(manual = false) {
-const token = document.getElementById("ghToken").value.trim();
-const repo = document.getElementById("ghRepo").value.trim();
-const branch = document.getElementById("ghBranch").value.trim() || "main";
-if (!token || !repo) { if (manual) alert("Enter your GitHub Token and Repository first."); return; }
-syncBadge.textContent = "GitHub Sync: Committing..."; syncBadge.className = "sync-badge";
-const headers = { "Authorization": Bearer ${token}, "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json" };
-const workFile = (workingDocTitle.value.trim() || "WORKING_DOC.md").replace(/^/+/, "");
-try {
+
+    function escapeHtml(str) { return str.replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m])); }
+   function buildSystemPrompt(agentName, persona) {
+      const brief = projectBrief.value.trim();
+      const activeRefs = refDocs.filter(d => d.active);
+      const workTitle = workingDocTitle.value.trim() || "WORKING_DOC.md";
+      const workBody = workingDocContent.value.trim();
+      let sys = "You are " + agentName + " in a shared collaborative workspace with the User, ChatGPT, Claude, and Gemini.\nYour persona: " + persona + "\nEveryone sees every message in the chat, all active Reference Documents, and the Live Shared Working Document. Note that ChatGPT and the User collaborate closely.";
+      if (brief) sys += "\n\n=== PINNED PROJECT BRIEF & DECISIONS ===\n" + brief + "\n=======================================";
+      if (activeRefs.length > 0) sys += "\n\n=== REFERENCE DOCUMENTS (READ-ONLY CONTEXT) ===\n" + activeRefs.map(d => "--- FILE: " + d.name + " ---\n" + d.content.slice(0, 12000)).join("\n\n") + "\n===============================================";
+      sys += "\n\n=== LIVE SHARED WORKING DOCUMENT (" + workTitle + ") ===\n" + (workBody || "(Currently empty)") + "\n===================================================";
+      sys += "\n\nCOLLABORATIVE EDITING RULE: You CANNOT directly overwrite the Live Shared Working Document without User approval. Whenever you want to create or update the working document, explain your reasoning briefly in 1-2 sentences, then output the COMPLETE updated document text wrapped strictly inside <PROPOSED_DOC> and </PROPOSED_DOC> tags so the User can review and click Approve.";
+      return sys;
+    }
+
+    function formatTranscriptForPrompt(agentName) {
+      const history = transcript.slice(-40).map(m => m.speaker + ": " + m.text).join("\n\n");
+      return "Shared room transcript:\n" + (history || "(Empty room — greet the User or inspect the working document)") + "\n\nInstructions for " + agentName + ": Respond naturally in 2-4 concise sentences (unless proposing a document update inside <PROPOSED_DOC>...</PROPOSED_DOC>). If you have nothing meaningful to add right now, reply strictly with the word PASS.";
+    }
+
+    async function callChatGPT(promptText) {
+      const key = document.getElementById("openaiKey").value.trim();
+      if (!key) throw new Error("Missing OpenAI API key.");
+      const res = await fetch("https://openai.com", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + key },
+        body: JSON.stringify({ model: "gpt-4o-mini", max_tokens: 1500, messages: [{ role: "system", content: buildSystemPrompt("ChatGPT", document.getElementById("openaiPersona").value) }, { role: "user", content: promptText }] })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error("ChatGPT: " + (data.error?.message || "Error"));
+      return data.choices.at(0).message.content.trim();
+    }
+
+    async function callClaude(promptText) {
+      const key = document.getElementById("claudeKey").value.trim();
+      if (!key) throw new Error("Missing Anthropic API key.");
+      const res = await fetch("https://anthropic.com", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1500, system: buildSystemPrompt("Claude", document.getElementById("claudePersona").value), messages: [{ role: "user", content: promptText }] })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error("Claude: " + (data.error?.message || "Error"));
+      return data.content.at(0).text.trim();
+    }
+
+    async function callGemini(promptText) {
+      const key = document.getElementById("geminiKey").value.trim();
+      if (!key) throw new Error("Missing Gemini API key.");
+      const res = await fetch("https://googleapis.com" + key, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ systemInstruction: { parts: [{ text: buildSystemPrompt("Gemini", document.getElementById("geminiPersona").value) }] }, contents: [{ role: "user", parts: [{ text: promptText }] }], generationConfig: { maxOutputTokens: 1500 } })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error("Gemini: " + (data.error?.message || "Error"));
+      return data.candidates.at(0).content.parts.at(0).text.trim();
+    }
+   function setControlsState(running) {
+      isRunning = running;
+      document.getElementById("stopBtn").disabled = !running;
+      document.getElementById("continueBtn").disabled = running;
+      document.getElementById("chatgptFirstBtn").disabled = running;
+    }
+
+    function stopLoop() { abortRequested = true; statusText.textContent = "Pausing after current turn..."; }
+
+    async function sendHumanMessage() {
+      const text = userInput.value.trim();
+      if (!text) return;
+      abortRequested = true;
+      userInput.value = "";
+      addMessage("human", "You", text);
+      setTimeout(() => { if (!isRunning) runOpenFloor(); }, 200);
+    }
+
+    async function triggerSpecificAI(name) {
+      if (isRunning) return;
+      setControlsState(true);
+      abortRequested = false;
+      try {
+        statusText.textContent = name + " is thinking...";
+        const prompt = formatTranscriptForPrompt(name).replace("If you have nothing meaningful to add right now, reply strictly with the word PASS.", "Kick off or advance the discussion directly.");
+        const reply = await callChatGPT(prompt);
+        addMessage("chatgpt", "ChatGPT", reply);
+        await runOpenFloor(true);
+      } catch (err) { statusText.textContent = "Error: " + err.message; }
+      finally { setControlsState(false); }
+    }
+
+    function detectAddressedAgent(text, agents, currentSpeaker) {
+      const lower = text.toLowerCase();
+      const mentioned = agents.filter(a => a.name !== currentSpeaker && lower.includes(a.name.toLowerCase()));
+      return mentioned.length === 1 ? mentioned.at(0) : null;
+    }
+
+    async function runOpenFloor(skipSetup = false) {
+      if (isRunning && !skipSetup) return;
+      setControlsState(true);
+      abortRequested = false;
+      const agents = [
+        { name: "ChatGPT", css: "chatgpt", fn: callChatGPT },
+        { name: "Claude", css: "claude", fn: callClaude },
+        { name: "Gemini", css: "gemini", fn: callGemini }
+      ];
+      try {
+        for (let round = 0; round < 3; round++) {
+          let someoneSpoke = false;
+          const lastMsg = transcript.at(-1), lastSpeaker = lastMsg?.speaker;
+          const target = lastMsg ? detectAddressedAgent(lastMsg.text, agents, lastSpeaker) : null;
+          let order;
+          if (target) {
+            const rest = agents.filter(a => a.name !== target.name && a.name !== lastSpeaker);
+            order = [target, ...rest];
+          } else {
+            const others = agents.filter(a => a.name !== lastSpeaker && a.name !== "ChatGPT").sort(() => Math.random() - 0.5);
+            order = lastSpeaker === "ChatGPT" ? others : [agents.at(0), ...others];
+          }
+          for (const agent of order) {
+            if (abortRequested) break;
+            const isTargeted = target && agent.name === target.name;
+            statusText.textContent = isTargeted ? (agent.name + " was addressed and is replying...") : ("Checking if " + agent.name + " wants to chime in...");
+            let prompt = formatTranscriptForPrompt(agent.name);
+            if (isTargeted) prompt = prompt.replace("If you have nothing meaningful to add right now, reply strictly with the word PASS.", "You were just directly addressed—answer directly.");
+            const reply = await agent.fn(prompt);
+            if (abortRequested) break;
+            if (reply.toUpperCase() !== "PASS" && reply.toUpperCase() !== "PASS.") {
+              addMessage(agent.css, agent.name, reply);
+              someoneSpoke = true;
+              if (detectAddressedAgent(reply, agents, agent.name)) break;
+            }
+          }
+          if (abortRequested || !someoneSpoke) break;
+        }
+        statusText.textContent = abortRequested ? "Paused for your input." : "Room is waiting for you.";
+      } catch (err) { statusText.textContent = "Error: " + err.message; }
+      finally { setControlsState(false); abortRequested = false; }
+    }
+   function buildTranscriptMarkdown() {
+      const brief = projectBrief.value.trim();
+      let md = "# AI Group Room Transcript\nLast Updated: " + new Date().toLocaleString() + "\n\n";
+      if (brief) md += "## Pinned Project Brief & Decisions\n" + brief + "\n\n---\n\n";
+      md += "## Conversation Log\n\n" + transcript.map(m => "### " + m.speaker + " (" + m.time + ")\n" + m.text).join("\n\n");
+      return md;
+    }
+
+    function downloadTranscript() {
+      const blob = new Blob([buildTranscriptMarkdown()], { type: "text/markdown" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = "ai-roundtable-" + new Date().toISOString().slice(0, 10) + ".md"; a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function downloadWorkingDoc() {
+      const title = workingDocTitle.value.trim() || "WORKING_DOC.md";
+      const blob = new Blob([workingDocContent.value], { type: "text/plain" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = title; a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function scheduleGitHubSync() {
+      const token = document.getElementById("ghToken").value.trim(), repo = document.getElementById("ghRepo").value.trim();
+      if (!token || !repo) return;
+      clearTimeout(syncTimer);
+      syncBadge.textContent = "GitHub Sync: Queued..."; syncBadge.className = "sync-badge";
+      syncTimer = setTimeout(() => syncAllToGitHub(false), 2500);
+    }
+
+    function utf8ToBase64(str) {
+      const bytes = new TextEncoder().encode(str);
+      let bin = "";
+      bytes.forEach(b => bin += String.fromCharCode(b));
+      return btoa(bin);
+    }
+
+    async function commitSingleFile(repo, branch, path, contentStr, message, headers) {
+      const apiUrl = ["https://github.com", "repos", repo, "contents", path].join("/");
+      let sha = null;
+      const getRes = await fetch(apiUrl + "?ref=" + encodeURIComponent(branch), { headers });
+      if (getRes.ok) { const existing = await getRes.json(); sha = existing.sha; }
+      else if (getRes.status !== 404) { const errData = await getRes.json(); throw new Error(errData.message || ("HTTP " + getRes.status)); }
+      const payload = { message, content: utf8ToBase64(contentStr), branch };
+      if (sha) payload.sha = sha;
+      const putRes = await fetch(apiUrl, { method: "PUT", headers, body: JSON.stringify(payload) });
+      if (!putRes.ok) { const errData = await putRes.json(); throw new Error(errData.message || ("HTTP " + putRes.status)); }
+    }
+
+    async function syncAllToGitHub(manual = false) {
+      const token = document.getElementById("ghToken").value.trim();
+      const repo = document.getElementById("ghRepo").value.trim();
+      const branch = document.getElementById("ghBranch").value.trim() || "main";
+      if (!token || !repo) { if (manual) alert("Enter your GitHub Token and Repository first."); return; }
+      syncBadge.textContent = "GitHub Sync: Committing..."; syncBadge.className = "sync-badge";
+      const headers = { "Authorization": "Bearer " + token, "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json" };
+      const workFile = (workingDocTitle.value.trim() || "WORKING_DOC.md").replace(/^\/+/, "");
+      try {
         await commitSingleFile(repo, branch, "transcripts/SHARED_CHAT.md", buildTranscriptMarkdown(), "Update chat transcript (" + new Date().toLocaleTimeString() + ")", headers);
         await commitSingleFile(repo, branch, "workspace/" + workFile, workingDocContent.value, "Update working doc " + workFile + " (" + new Date().toLocaleTimeString() + ")", headers);
         const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-        syncBadge.textContent = "GitHub Sync: Saved chat & " + workFile + " at " + time;
-        syncBadge.className = "sync-badge sync-ok";
+        syncBadge.textContent = "GitHub Sync: Saved chat & " + workFile + " at " + time; syncBadge.className = "sync-badge sync-ok";
       } catch (err) {
-        syncBadge.textContent = "GitHub Sync Error: " + err.message;
-        syncBadge.className = "sync-badge sync-err";
+        syncBadge.textContent = "GitHub Sync Error: " + err.message; syncBadge.className = "sync-badge sync-err";
       }
     }
 
     function clearChat() {
       if (!confirm("Clear the chat log? (Your Pinned Brief, Reference Docs, and Working Document will remain.)")) return;
-      transcript = [];
-      saveTranscript();
-      renderAll();
-      statusText.textContent = "Chat cleared.";
+      transcript = []; saveTranscript(); renderAll(); statusText.textContent = "Chat cleared.";
     }
   </script>
 </body>
