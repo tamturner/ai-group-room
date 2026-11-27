@@ -686,7 +686,7 @@ function extractGoogleDocId(urlStr) {
       return m ? m.at(1) : null;
     }
 
-    async function pullFromGoogleDoc() {
+async function pullFromGoogleDoc() {
       const url = document.getElementById("gdocUrl").value.trim();
       const secret = document.getElementById("gdocSecret").value.trim();
       const docId = extractGoogleDocId(workingDocGdocUrl.value);
@@ -694,7 +694,11 @@ function extractGoogleDocId(urlStr) {
       if (!docId) return alert("Paste your Google Doc link into the 'Paste this tab's Google Doc link here' box above the editor first.");
       statusText.textContent = "Pulling latest text from Google Doc...";
       try {
-        const res = await fetch(url + "?key=" + encodeURIComponent(secret) + "&docId=" + encodeURIComponent(docId));
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({ action: "pull", key: secret, docId: docId })
+        });
         const text = await res.text();
         if (text === "Unauthorized") throw new Error("Invalid Secret Key.");
         const data = JSON.parse(text);
