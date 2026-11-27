@@ -596,7 +596,7 @@
     }
 
     async function commitSingleFile(repo, branch, path, contentStr, message, headers) {
-      const apiUrl = ["https://github.com", "repos", repo, "contents", path].join("/");
+     const apiUrl = ["https://github.com", "repos", repo, "contents", path].join("/");
       let sha = null;
       const getRes = await fetch(apiUrl + "?ref=" + encodeURIComponent(branch), { headers });
       if (getRes.ok) { const existing = await getRes.json(); sha = existing.sha; }
