@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "requestId": "turn-scheduled-pilot-001",
+  "status": "pending",
+  "requestedAt": "2026-11-27T20:26:50.595Z",
+  "requestedBy": "User",
+  "promptNote": "Synthetic one-time scheduling pilot",
+  "latestMessage": {
+    "speaker": "You",
+    "text": "Suggest one short title for a fictional Moon Garden brainstorming session."
+  }
+}
