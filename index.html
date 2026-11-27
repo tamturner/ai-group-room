@@ -62,12 +62,12 @@
   <div class="top-bar">
     <h1>AI Group Room — Collaborative Workspace</h1>
     <div class="btn-group" style="margin-top:0;">
-      <button class="secondary" onclick="syncAllToGitHub(true)">Sync All to GitHub<div class="btn-group" style="margin-top:0;">
       <button class="secondary" onclick="syncAllToGitHub(true)">Save All to GitHub</button>
       <button class="secondary" onclick="loadFromGitHub()">Load from GitHub</button>
       <button class="secondary" onclick="downloadTranscript()">Download Chat .md</button>
       <button class="danger" onclick="clearChat()">Clear Chat</button>
     </div>
+  </div>
 
   <!-- PINNED BRIEF -->
   <div class="card brief-card">
@@ -93,7 +93,10 @@
   <details class="card">
     <summary>API Keys, Personas, GitHub Sync &amp; Google Doc Bridge</summary>
     <div class="grid-3" style="margin-top: 0.8rem;">
-      <div><label>OpenAI Key (ChatGPT)</label><input type="password" id="openaiKey" placeholder="sk-..." /></div>
+      <div><label for="chatgptMode">ChatGPT connection</label>
+        <select id="chatgptMode"><option value="external_pro">External ChatGPT Pro (GitHub inbox)</option><option value="api">OpenAI API</option></select>
+        <label for="openaiKey">OpenAI Key (API mode)</label><input type="password" id="openaiKey" placeholder="sk-..." />
+      </div>
       <div><label>Anthropic Key (Claude)</label><input type="password" id="claudeKey" placeholder="sk-ant-..." /></div>
       <div><label>Google AI Studio Key (Gemini)</label><input type="password" id="geminiKey" placeholder="AIza..." /></div>
     </div>
@@ -130,7 +133,7 @@
     <div>
       <div class="chat-box" id="chatBox"></div>
       <div class="status-bar">
-        <span id="statusText" style="font-style:italic;">Ready. All AIs see the chat, active reference docs, and live working doc.</span>
+        <span id="statusText" style="font-style:italic;">Ready.</span>
         <span class="sync-badge" id="syncBadge">GitHub Sync: Not configured</span>
       </div>
       <div class="composer">
@@ -141,7 +144,8 @@
         <div class="btn-group">
           <button class="secondary" id="chatgptFirstBtn" onclick="triggerSpecificAI('ChatGPT')">Let ChatGPT Speak First</button>
           <button class="secondary" id="continueBtn" onclick="runOpenFloor()">Let Room Respond</button>
-          <button class="danger" id="stopBtn" onclick="stopLoop()" disabled>Pause</button>
+          <button class="danger" id="stopBtn" onclick="stopLoop()">Pause</button>
+          <span id="externalStatus" role="status" style="font-size:0.78rem; color:#8b949e;"></span>
         </div>
       </div>
     </div>
@@ -179,13 +183,23 @@
       WORK_TITLE: "ai_ws_work_title_v3",
       WORK_BODY: "ai_ws_work_body_v3",
       SETTINGS: "ai_ws_settings_v3",
-      SECRETS: "ai_ws_secrets_v3"
+      SECRETS: "ai_ws_secrets_v3",
+      ROOM: "ai_ws_room_v4"
     };
 
-    let transcript = JSON.parse(localStorage.getItem(KEYS.TRANSCRIPT) || "[]");
-    let refDocs = JSON.parse(localStorage.getItem(KEYS.REFS) || "[]");
-    let pendingProposals = {};
+    let roomState = JSON.parse(localStorage.getItem(KEYS.ROOM) || "null") || {
+      transcript: JSON.parse(localStorage.getItem(KEYS.TRANSCRIPT) || "[]"),
+      inboxes: {}
+    };
+    let transcript = roomState.transcript;
+    let refDocs = roomState.refDocs ?? JSON.parse(localStorage.getItem(KEYS.REFS) || "[]");
+    let roomPaused = roomState.roomPaused === true;
     let isRunning = false, abortRequested = false, syncTimer = null;
+    let syncInFlight = null, restoring = false, pollInFlight = false;
+    let roomRevision = 0;
+    const dirtyDocIds = new Set();
+    const rejectedInboxBlobs = new Set();
+    const BACKUP_PATH = "workspace/SESSION_BACKUP.json";
 
     const chatBox = document.getElementById("chatBox");
     const statusText = document.getElementById("statusText");
@@ -196,15 +210,21 @@
     const workingDocContent = document.getElementById("workingDocContent");
 
    const workingDocGdocUrl = document.getElementById("workingDocGdocUrl");
-    let workingDocs = JSON.parse(localStorage.getItem("ai_ws_docs_array_v1") || "null") || [
-      { id: "doc_1", title: "Character Bible.md", gdocUrl: "", content: "" }
-    ];
-    let activeDocId = workingDocs.at(0).id;
+    let workingDocs = roomState.workingDocs ?? JSON.parse(localStorage.getItem("ai_ws_docs_array_v1") || "null");
+    if (!workingDocs?.length) workingDocs = [{
+      id: "doc_1",
+      title: localStorage.getItem(KEYS.WORK_TITLE) || "Character Bible.md",
+      gdocUrl: "",
+      content: localStorage.getItem(KEYS.WORK_BODY) || ""
+    }];
+    let activeDocId = workingDocs.some(doc => doc.id === roomState.activeDocId)
+      ? roomState.activeDocId : workingDocs[0].id;
 
     function getActiveDoc() { return workingDocs.find(d => d.id === activeDocId) || workingDocs.at(0); }
 
-    function saveWorkingDocs() {
-      localStorage.setItem("ai_ws_docs_array_v1", JSON.stringify(workingDocs));
+    function saveWorkingDocs(doc) {
+      persistRoom();
+      if (doc) dirtyDocIds.add(doc.id);
       scheduleGitHubSync();
     }
 
@@ -218,7 +238,7 @@
         btn.className = doc.id === activeDocId ? "" : "secondary";
         btn.style.padding = "0.28rem 0.65rem";
         btn.style.fontSize = "0.78rem";
-        btn.onclick = () => { activeDocId = doc.id; renderDocTabs(); };
+        btn.onclick = () => { activeDocId = doc.id; persistRoom(); scheduleGitHubSync(); renderDocTabs(); };
         bar.appendChild(btn);
       });
       const cur = getActiveDoc();
@@ -230,16 +250,17 @@
     }
 
     function addNewWorkingDoc() {
-      const newDoc = { id: "doc_" + Date.now(), title: "Doc " + (workingDocs.length + 1) + ".md", gdocUrl: "", content: "" };
+      const newDoc = { id: "doc_" + crypto.randomUUID(), title: "Doc " + (workingDocs.length + 1) + ".md", gdocUrl: "", content: "" };
       workingDocs.push(newDoc);
       activeDocId = newDoc.id;
-      saveWorkingDocs();
+      saveWorkingDocs(newDoc);
       renderDocTabs();
     }
 
     function deleteCurrentWorkingDoc() {
       if (workingDocs.length <= 1) return alert("Keep at least one working document tab open.");
       if (!confirm("Delete tab '" + getActiveDoc().title + "'?")) return;
+      dirtyDocIds.delete(activeDocId);
       workingDocs = workingDocs.filter(d => d.id !== activeDocId);
       activeDocId = workingDocs.at(0).id;
       saveWorkingDocs();
@@ -250,12 +271,14 @@
     renderRefDocs();
     renderDocTabs();
     renderAll();
+    setControlsState(false);
+    if (roomPaused) statusText.textContent = "Paused. Inbox replies can still arrive.";
 
-    projectBrief.addEventListener("input", () => { localStorage.setItem(KEYS.BRIEF, projectBrief.value); scheduleGitHubSync(); });
-    workingDocTitle.addEventListener("input", () => { getActiveDoc().title = workingDocTitle.value; saveWorkingDocs(); renderDocTabs(); });
+    projectBrief.addEventListener("input", () => { persistRoom(); scheduleGitHubSync(); });
+    workingDocTitle.addEventListener("input", () => { getActiveDoc().title = workingDocTitle.value; saveWorkingDocs(getActiveDoc()); renderDocTabs(); renderAll(); });
     workingDocGdocUrl.addEventListener("input", () => { getActiveDoc().gdocUrl = workingDocGdocUrl.value.trim(); saveWorkingDocs(); });
-    workingDocContent.addEventListener("input", () => { getActiveDoc().content = workingDocContent.value; saveWorkingDocs(); });
-    ["openaiPersona", "claudePersona", "geminiPersona", "ghRepo", "ghBranch", "openaiKey", "claudeKey", "geminiKey", "ghToken", "rememberKeys"].forEach(id => {
+    workingDocContent.addEventListener("input", () => { getActiveDoc().content = workingDocContent.value; saveWorkingDocs(getActiveDoc()); });
+    ["chatgptMode", "openaiPersona", "claudePersona", "geminiPersona", "ghRepo", "ghBranch", "openaiKey", "claudeKey", "geminiKey", "ghToken", "rememberKeys"].forEach(id => {
       document.getElementById(id).addEventListener("input", saveSettingsAndSecrets);
       document.getElementById(id).addEventListener("change", saveSettingsAndSecrets);
     });
@@ -286,15 +309,20 @@
     document.getElementById("workingFileInput").addEventListener("change", async (e) => {
       const file = e.target.files.item(0);
       if (!file) return;
-      workingDocTitle.value = file.name.replace(/\.docx$/i, ".md");
-      workingDocContent.value = await extractFileText(file);
-      localStorage.setItem(KEYS.WORK_TITLE, workingDocTitle.value);
-      localStorage.setItem(KEYS.WORK_BODY, workingDocContent.value);
-      scheduleGitHubSync();
+      const doc = getActiveDoc();
+      const content = await extractFileText(file);
+      if (!workingDocs.includes(doc)) return;
+      doc.title = file.name.replace(/\.docx$/i, ".md");
+      doc.content = content;
+      saveWorkingDocs(doc);
+      renderDocTabs();
       e.target.value = "";
     });
 
-    function saveRefDocs() { localStorage.setItem(KEYS.REFS, JSON.stringify(refDocs)); }
+    function saveRefDocs() {
+      persistRoom();
+      scheduleGitHubSync();
+    }
 
     function renderRefDocs() {
       const list = document.getElementById("refList");
@@ -312,10 +340,9 @@
     function removeRefDoc(idx) { refDocs.splice(idx, 1); saveRefDocs(); renderRefDocs(); }
 
     function loadSavedState() {
-      projectBrief.value = localStorage.getItem(KEYS.BRIEF) || "";
-      workingDocTitle.value = localStorage.getItem(KEYS.WORK_TITLE) || "WORKING_DOC.md";
-      workingDocContent.value = localStorage.getItem(KEYS.WORK_BODY) || "";
+      projectBrief.value = roomState.brief ?? localStorage.getItem(KEYS.BRIEF) ?? "";
       const settings = JSON.parse(localStorage.getItem(KEYS.SETTINGS) || "{}");
+      document.getElementById("chatgptMode").value = settings.chatgptMode === "api" ? "api" : "external_pro";
       if (settings.openaiPersona) document.getElementById("openaiPersona").value = settings.openaiPersona;
       if (settings.claudePersona) document.getElementById("claudePersona").value = settings.claudePersona;
       if (settings.geminiPersona) document.getElementById("geminiPersona").value = settings.geminiPersona;
@@ -330,11 +357,13 @@
         if (secrets.ghToken) document.getElementById("ghToken").value = secrets.ghToken;
       }
       updateSyncBadge();
+      updateExternalStatus();
     }
 
     function saveSettingsAndSecrets() {
       const remember = document.getElementById("rememberKeys").checked;
       localStorage.setItem(KEYS.SETTINGS, JSON.stringify({
+        chatgptMode: document.getElementById("chatgptMode").value,
         openaiPersona: document.getElementById("openaiPersona").value,
         claudePersona: document.getElementById("claudePersona").value,
         geminiPersona: document.getElementById("geminiPersona").value,
@@ -353,6 +382,7 @@
         localStorage.removeItem(KEYS.SECRETS);
       }
       updateSyncBadge();
+      updateExternalStatus();
     }
 
     function updateSyncBadge() {
@@ -360,7 +390,12 @@
       if (token && repo) { syncBadge.textContent = "GitHub Sync: Ready (" + repo + ")"; syncBadge.className = "sync-badge sync-ok"; }
       else { syncBadge.textContent = "GitHub Sync: Not configured"; syncBadge.className = "sync-badge"; }
     }
-    function saveTranscript() { localStorage.setItem(KEYS.TRANSCRIPT, JSON.stringify(transcript)); scheduleGitHubSync(); }
+    function persistRoom(changes = {}) {
+      const saved = { ...roomState, activeDocId, workingDocs, refDocs, brief: projectBrief.value, roomPaused, ...changes };
+      localStorage.setItem(KEYS.ROOM, JSON.stringify(saved));
+      roomState = saved;
+      transcript = saved.transcript;
+    }
 
     function renderAll() {
       chatBox.innerHTML = "";
@@ -373,46 +408,78 @@
     }
 
     function parseProposal(text) {
-      const match = text.match(/<PROPOSED_DOC>([\s\S]*?)<\/PROPOSED_DOC>/i);
-      if (!match) return { cleanText: text, proposedContent: null };
-      return { cleanText: text.replace(match.at(0), "").trim(), proposedContent: match.at(1).trim() };
+      const match = text.match(/<PROPOSED_DOC(?:\s+target\s*=\s*(?:"([^"]+)"|'([^']+)'))?\s*>([\s\S]*?)<\/PROPOSED_DOC>/i);
+      if (!match) return { cleanText: text, proposedContent: null, target: "" };
+      const cleanText = text.replace(match[0], "").trim();
+      const legacyTarget = cleanText.match(/^Target Document:[ \t]*(.+)$/im)?.[1];
+      return { cleanText, proposedContent: match[3].trim(), target: (match[1] || match[2] || legacyTarget || "").trim() };
+    }
+
+    function resolveProposalTarget(title) {
+      const matches = workingDocs.filter(doc => doc.title.trim() === title);
+      return title && matches.length === 1 ? matches[0] : null;
+    }
+
+    function proposalTarget(msg, target) {
+      if (Object.hasOwn(msg, "proposalDocId")) {
+        return workingDocs.find(doc => doc.id === msg.proposalDocId);
+      }
+      return resolveProposalTarget(target);
     }
 
     function appendMessageDOM(msg) {
       if (transcript.length === 1 && chatBox.firstChild?.style?.textAlign === "center") chatBox.innerHTML = "";
-      const { cleanText, proposedContent } = parseProposal(msg.text);
+      const proposal = msg.css !== "human" ? parseProposal(msg.text) : { cleanText: msg.text, proposedContent: null };
       const div = document.createElement("div");
       div.className = "msg " + msg.css;
-      let html = '<div class="sender"><span>' + msg.speaker + '</span><span style="font-weight:normal;opacity:0.7;">' + msg.time + '</span></div>';
-      if (cleanText) html += '<div>' + escapeHtml(cleanText).replace(/\n/g, "<br>") + '</div>';
-      if (proposedContent !== null) {
-        const propId = "prop_" + Math.random().toString(36).slice(2, 9);
-        pendingProposals[propId] = { speaker: msg.speaker, content: proposedContent };
-        html += '<div class="proposal-box"><div class="proposal-header">PROPOSED UPDATE TO: ' + escapeHtml(workingDocTitle.value) + ' (From ' + msg.speaker + ')</div><div class="proposal-preview">' + escapeHtml(proposedContent) + '</div><button class="approve-btn" id="btn_' + propId + '" onclick="approveProposal(\'' + propId + '\')">Approve &amp; Apply to Working Doc</button></div>';
+      div.innerHTML = '<div class="sender"><span>' + escapeHtml(msg.speaker) + '</span><span style="font-weight:normal;opacity:0.7;">' + escapeHtml(msg.time) + '</span></div>';
+      if (proposal.cleanText) div.innerHTML += '<div>' + escapeHtml(proposal.cleanText).replace(/\n/g, "<br>") + '</div>';
+      if (proposal.proposedContent !== null) {
+        const doc = proposalTarget(msg, proposal.target);
+        const box = document.createElement("div");
+        box.className = "proposal-box";
+        box.innerHTML = '<div class="proposal-header">PROPOSED UPDATE TO: ' + escapeHtml(doc?.title || proposal.target || "Unspecified tab") +
+          '</div><div class="proposal-preview">' + escapeHtml(proposal.proposedContent) + '</div>';
+        const btn = document.createElement("button");
+        btn.className = "approve-btn";
+        btn.textContent = msg.proposalApplied ? "Applied" : doc ? "Approve & Apply to Working Doc" : "Proposal needs an exact, unique tab name";
+        btn.disabled = !!msg.proposalApplied || !doc;
+        btn.onclick = () => approveProposal(msg, doc.id, proposal.proposedContent);
+        box.appendChild(btn);
+        div.appendChild(box);
       }
-      div.innerHTML = html;
       chatBox.appendChild(div);
       chatBox.scrollTop = chatBox.scrollHeight;
     }
 
-   function approveProposal(propId) {
-      const prop = pendingProposals[propId];
-      if (!prop) return;
-      const cur = getActiveDoc();
-      cur.content = prop.content;
-      workingDocContent.value = prop.content;
-      const btn = document.getElementById("btn_" + propId);
-      if (btn) { btn.textContent = "Applied to " + cur.title; btn.disabled = true; btn.style.background = "#238636"; }
-      saveWorkingDocs();
-      pushToGoogleDoc(false);
-      statusText.textContent = "Approved & applied " + prop.speaker + "'s edit to " + cur.title + ".";
+    async function approveProposal(msg, docId, content) {
+      const doc = workingDocs.find(item => item.id === docId);
+      if (restoring || !transcript.includes(msg) || !doc || msg.proposalApplied) return;
+      const docs = workingDocs.map(item => item === doc ? { ...doc, content } : item);
+      const messages = transcript.map(item => item === msg ? { ...msg, proposalApplied: true, proposalDocId: docId } : item);
+      persistRoom({ workingDocs: docs, transcript: messages });
+      workingDocs = docs;
+      dirtyDocIds.add(docId);
+      scheduleGitHubSync();
+      renderDocTabs();
+      renderAll();
+      statusText.textContent = "Approved & applied " + msg.speaker + "'s edit to " + doc.title + ".";
+      await pushToGoogleDoc(false, docs.find(item => item.id === docId));
+    }
+
+    function makeMessage(css, speaker, text, extra = {}) {
+      const entry = { css, speaker, text, time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), ...extra };
+      if (css !== "human") {
+        const proposal = parseProposal(text);
+        if (proposal.proposedContent !== null) entry.proposalDocId = resolveProposalTarget(proposal.target)?.id ?? null;
+      }
+      return entry;
     }
 
     function addMessage(css, speaker, text) {
-      const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-      const entry = { css, speaker, text, time };
-      transcript.push(entry);
-      saveTranscript();
+      const entry = makeMessage(css, speaker, text);
+      persistRoom({ transcript: [...transcript, entry] });
+      scheduleGitHubSync();
       appendMessageDOM(entry);
     }
 
@@ -420,15 +487,13 @@
    function buildSystemPrompt(agentName, persona) {
       const brief = projectBrief.value.trim();
       const activeRefs = refDocs.filter(d => d.active);
-      const workTitle = workingDocTitle.value.trim() || "WORKING_DOC.md";
-      const workBody = workingDocContent.value.trim();
       let sys = "You are " + agentName + " in a shared collaborative workspace with the User, ChatGPT, Claude, and Gemini.\nYour persona: " + persona + "\nEveryone sees every message in the chat, all active Reference Documents, and the Live Shared Working Document. Note that ChatGPT and the User collaborate closely.";
       if (brief) sys += "\n\n=== PINNED PROJECT BRIEF & DECISIONS ===\n" + brief + "\n=======================================";
       if (activeRefs.length > 0) sys += "\n\n=== REFERENCE DOCUMENTS (READ-ONLY CONTEXT) ===\n" + activeRefs.map(d => "--- FILE: " + d.name + " ---\n" + d.content.slice(0, 12000)).join("\n\n") + "\n===============================================";
      sys += "\n\n=== LIVE SHARED WORKING DOCUMENTS (ALL OPEN TABS) ===\n" +
         workingDocs.map(d => "--- TAB: " + d.title + " ---\n" + (d.content || "(Empty)")).join("\n\n") +
         "\n====================================================";
-      sys += "\n\nCOLLABORATIVE EDITING RULE: You CANNOT directly overwrite a working document without User approval. Whenever you want to create or update a working document, state the exact tab name, explain your reasoning in 1-2 sentences, and output the COMPLETE updated document text wrapped strictly inside <PROPOSED_DOC> and </PROPOSED_DOC> tags.";
+      sys += "\n\nCOLLABORATIVE EDITING RULE: You CANNOT directly overwrite a working document without User approval. Whenever you want to create or update a working document, state the exact tab name, explain your reasoning in 1-2 sentences, and output the COMPLETE updated document text wrapped in <PROPOSED_DOC target=\"Exact Tab Name\">...</PROPOSED_DOC>.";
      return sys;
     }
 
@@ -440,7 +505,7 @@
     async function callChatGPT(promptText) {
       const key = document.getElementById("openaiKey").value.trim();
       if (!key) throw new Error("Missing OpenAI API key.");
-      const res = await fetch("https://openai.com", {
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": "Bearer " + key },
         body: JSON.stringify({ model: "gpt-4o-mini", max_tokens: 1500, messages: [{ role: "system", content: buildSystemPrompt("ChatGPT", document.getElementById("openaiPersona").value) }, { role: "user", content: promptText }] })
@@ -453,80 +518,109 @@
     async function callClaude(promptText) {
       const key = document.getElementById("claudeKey").value.trim();
       if (!key) throw new Error("Missing Anthropic API key.");
-      const res = await fetch("https://anthropic.com", {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1500, system: buildSystemPrompt("Claude", document.getElementById("claudePersona").value), messages: [{ role: "user", content: promptText }] })
+        body: JSON.stringify({ model: "claude-sonnet-5-5", max_tokens: 1500, system: buildSystemPrompt("Claude", document.getElementById("claudePersona").value), messages: [{ role: "user", content: promptText }] })
       });
       const data = await res.json();
       if (!res.ok) throw new Error("Claude: " + (data.error?.message || "Error"));
-      return data.content.at(0).text.trim();
+      return data.content.filter(part => part.type === "text").map(part => part.text).join("\n").trim();
     }
 
     async function callGemini(promptText) {
       const key = document.getElementById("geminiKey").value.trim();
       if (!key) throw new Error("Missing Gemini API key.");
-      const res = await fetch("https://googleapis.com" + key, {
+      const res = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-goog-api-key": key },
         body: JSON.stringify({ systemInstruction: { parts: [{ text: buildSystemPrompt("Gemini", document.getElementById("geminiPersona").value) }] }, contents: [{ role: "user", parts: [{ text: promptText }] }], generationConfig: { maxOutputTokens: 1500 } })
       });
       const data = await res.json();
       if (!res.ok) throw new Error("Gemini: " + (data.error?.message || "Error"));
-      return data.candidates.at(0).content.parts.at(0).text.trim();
+      return (data.candidates?.[0]?.content?.parts ?? [])
+        .filter(part => !part.thought && typeof part.text === "string").map(part => part.text).join("\n").trim();
     }
-   function setControlsState(running) {
+    function setControlsState(running) {
       isRunning = running;
-      document.getElementById("stopBtn").disabled = !running;
-      document.getElementById("continueBtn").disabled = running;
-      document.getElementById("chatgptFirstBtn").disabled = running;
+      document.getElementById("stopBtn").disabled = roomPaused;
+      document.getElementById("continueBtn").disabled = running || restoring;
+      document.getElementById("chatgptFirstBtn").disabled = running || restoring;
     }
 
-    function stopLoop() { abortRequested = true; statusText.textContent = "Pausing after current turn..."; }
+    function setPaused(paused) {
+      if (roomPaused === paused) return;
+      persistRoom({ roomPaused: paused });
+      roomPaused = paused;
+      setControlsState(isRunning);
+    }
+
+    function stopLoop() {
+      abortRequested = true;
+      setPaused(true);
+      statusText.textContent = "Paused. Inbox replies can still arrive.";
+    }
 
     async function sendHumanMessage() {
+      if (restoring) return;
       const text = userInput.value.trim();
       if (!text) return;
-      abortRequested = true;
-      userInput.value = "";
       addMessage("human", "You", text);
-      setTimeout(() => { if (!isRunning) runOpenFloor(); }, 200);
+      userInput.value = "";
+      if (roomPaused) return;
+      if (!isRunning) return runOpenFloor();
+      abortRequested = true;
+      if (externalMode() && githubSettings()) {
+        try { await requestExternalTurn(false, text); }
+        catch (err) { if (!roomPaused) statusText.textContent = "ChatGPT Pro request error: " + err.message; }
+      }
     }
 
     async function triggerSpecificAI(name) {
-      if (isRunning) return;
+      if (isRunning || restoring) return;
+      setPaused(false);
       setControlsState(true);
       abortRequested = false;
       try {
+        if (externalMode()) {
+          await requestExternalTurn(true);
+          return;
+        }
         statusText.textContent = name + " is thinking...";
         const prompt = formatTranscriptForPrompt(name).replace("If you have nothing meaningful to add right now, reply strictly with the word PASS.", "Kick off or advance the discussion directly.");
         const reply = await callChatGPT(prompt);
+        if (abortRequested || roomPaused) return;
         addMessage("chatgpt", "ChatGPT", reply);
-        await runOpenFloor(true);
-      } catch (err) { statusText.textContent = "Error: " + err.message; }
+        await runOpenFloor(true, true);
+      } catch (err) { if (!roomPaused) statusText.textContent = "Error: " + err.message; }
       finally { setControlsState(false); }
     }
 
-    function detectAddressedAgent(text, agents, currentSpeaker) {
-      const lower = text.toLowerCase();
-      const mentioned = agents.filter(a => a.name !== currentSpeaker && lower.includes(a.name.toLowerCase()));
-      return mentioned.length === 1 ? mentioned.at(0) : null;
-    }
-
-   async function runOpenFloor(skipSetup = false) {
-      if (isRunning && !skipSetup) return;
+    async function runOpenFloor(skipSetup = false, localOnly = false) {
+      if ((isRunning && !skipSetup) || restoring) return;
+      if (!skipSetup && !localOnly) setPaused(false);
+      if (roomPaused) return;
       setControlsState(true);
       abortRequested = false;
+
+      if (!localOnly && externalMode() && githubSettings()) {
+        try { await requestExternalTurn(); }
+        catch (err) { if (!roomPaused) statusText.textContent = "ChatGPT Pro request error: " + err.message; }
+        finally { setControlsState(false); }
+        return;
+      }
 
       const allAgents = [
         { name: "ChatGPT", css: "chatgpt", keyId: "openaiKey", fn: callChatGPT },
         { name: "Claude", css: "claude", keyId: "claudeKey", fn: callClaude },
         { name: "Gemini", css: "gemini", keyId: "geminiKey", fn: callGemini }
       ];
-
-      const activeAgents = allAgents.filter(a => document.getElementById(a.keyId).value.trim() !== "");
+      const activeAgents = allAgents.filter(a => !(externalMode() && a.name === "ChatGPT") &&
+        document.getElementById(a.keyId).value.trim() !== "");
       if (activeAgents.length === 0) {
-        statusText.textContent = "Add at least one API key in Settings so the AIs can reply.";
+        statusText.textContent = externalMode()
+          ? "Configure GitHub for ChatGPT Pro, or add a Claude or Gemini API key."
+          : "Add at least one API key in Settings so the AIs can reply.";
         setControlsState(false);
         return;
       }
@@ -552,19 +646,19 @@
           }
           if (abortRequested || !someoneSpoke) break;
         }
-        statusText.textContent = abortRequested ? "Paused for your input." : "2-round discussion complete — waiting for you.";
+        statusText.textContent = roomPaused ? "Paused. Inbox replies can still arrive." : abortRequested ? "Waiting for your input." : "Discussion complete. Waiting for you.";
       } catch (err) {
-        statusText.textContent = "Error: " + err.message;
+        if (!roomPaused) statusText.textContent = "Error: " + err.message;
       } finally {
         setControlsState(false);
         abortRequested = false;
       }
     }
-   function buildTranscriptMarkdown() {
+    function buildTranscriptMarkdown(messages = transcript) {
       const brief = projectBrief.value.trim();
       let md = "# AI Group Room Transcript\nLast Updated: " + new Date().toLocaleString() + "\n\n";
       if (brief) md += "## Pinned Project Brief & Decisions\n" + brief + "\n\n---\n\n";
-      md += "## Conversation Log\n\n" + transcript.map(m => "### " + m.speaker + " (" + m.time + ")\n" + m.text).join("\n\n");
+      md += "## Conversation Log\n\n" + messages.map(m => "### " + m.speaker + " (" + m.time + ")\n" + m.text).join("\n\n");
       return md;
     }
 
@@ -585,93 +679,407 @@
       URL.revokeObjectURL(url);
     }
 
-    function scheduleGitHubSync() {
-      const token = document.getElementById("ghToken").value.trim(), repo = document.getElementById("ghRepo").value.trim();
-      if (!token || !repo) return;
-      clearTimeout(syncTimer);
-      syncBadge.textContent = "GitHub Sync: Queued..."; syncBadge.className = "sync-badge";
-      syncTimer = setTimeout(() => syncAllToGitHub(false), 2500);
+    function externalMode() {
+      return document.getElementById("chatgptMode").value === "external_pro";
+    }
+
+    function githubSettings() {
+      const token = document.getElementById("ghToken").value.trim();
+      const repo = document.getElementById("ghRepo").value.trim().toLowerCase();
+      const branch = document.getElementById("ghBranch").value.trim();
+      if (!token || !/^[\w.-]+\/[\w.-]+$/.test(repo) || !branch) return null;
+      return {
+        repo, branch, scope: repo + "@" + branch,
+        headers: { "Authorization": "Bearer " + token, "Accept": "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json" }
+      };
+    }
+
+    function sameGitHubSettings(config) {
+      const current = githubSettings();
+      return current?.scope === config.scope && current.headers.Authorization === config.headers.Authorization;
+    }
+
+    function contentsUrl(config, path, read = true) {
+      const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+      const url = "https://api.github.com/repos/" + config.repo + "/contents/" + encodedPath;
+      return read ? url + "?ref=" + encodeURIComponent(config.branch) : url;
     }
 
     function utf8ToBase64(str) {
       const bytes = new TextEncoder().encode(str);
-      let bin = "";
-      bytes.forEach(b => bin += String.fromCharCode(b));
-      return btoa(bin);
+      let binary = "";
+      for (const byte of bytes) binary += String.fromCharCode(byte);
+      return btoa(binary);
     }
 
-    async function commitSingleFile(repo, branch, path, contentStr, message, headers) {
-     const apiUrl = ["https://api.github.com", "repos", repo, "contents", path].join("/");
-      let sha = null;
-      const getRes = await fetch(apiUrl + "?ref=" + encodeURIComponent(branch), { headers });
-      if (getRes.ok) { const existing = await getRes.json(); sha = existing.sha; }
-      else if (getRes.status !== 404) { const errData = await getRes.json(); throw new Error(errData.message || ("HTTP " + getRes.status)); }
-      const payload = { message, content: utf8ToBase64(contentStr), branch };
+    function decodeGitHubContent(content) {
+      if (typeof content !== "string" || !content.trim()) throw new Error("GitHub returned an empty file.");
+      const bytes = Uint8Array.from(atob(content.replace(/\s/g, "")), ch => ch.charCodeAt(0));
+      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    }
+
+    async function getGitHubFile(config, path) {
+      const res = await fetch(contentsUrl(config, path), { headers: config.headers, cache: "no-store" });
+      if (res.status === 404) return null;
+      if (!res.ok) throw new Error("GitHub read failed (HTTP " + res.status + ").");
+      return res.json();
+    }
+
+    async function putGitHubFile(config, path, content, message, sha) {
+      const payload = { message, content: utf8ToBase64(content), branch: config.branch };
       if (sha) payload.sha = sha;
-      const putRes = await fetch(apiUrl, { method: "PUT", headers, body: JSON.stringify(payload) });
-      if (!putRes.ok) { const errData = await putRes.json(); throw new Error(errData.message || ("HTTP " + putRes.status)); }
+      const res = await fetch(contentsUrl(config, path, false), {
+        method: "PUT", headers: config.headers, body: JSON.stringify(payload)
+      });
+      if (!res.ok) throw new Error("GitHub write failed (HTTP " + res.status + ") for " + path + ".");
     }
 
-    async function syncAllToGitHub(manual = false) {
-      const token = document.getElementById("ghToken").value.trim();
-      const repo = document.getElementById("ghRepo").value.trim();
-      const branch = document.getElementById("ghBranch").value.trim() || "main";
-      if (!token || !repo) { if (manual) alert("Enter your GitHub Token and Repository first."); return; }
-      syncBadge.textContent = "GitHub Sync: Saving..."; syncBadge.className = "sync-badge";
-      const headers = { "Authorization": "Bearer " + token, "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json" };
-      const workFile = (workingDocTitle.value.trim() || "WORKING_DOC.md").replace(/^\/+/, "");
-      const sessionSnapshot = JSON.stringify({
-        savedAt: new Date().toISOString(),
-        brief: projectBrief.value,
-        refDocs: refDocs,
-        workTitle: workingDocTitle.value,
-        workBody: workingDocContent.value,
-        transcript: transcript
-      }, null, 2);
-       try {
-        await commitSingleFile(repo, branch, "transcripts/SHARED_CHAT.md", buildTranscriptMarkdown(), "Update chat transcript (" + new Date().toLocaleTimeString() + ")", headers);
-        for (const doc of workingDocs) {
-          const tabFile = (doc.title.trim() || "UNTITLED.md").replace(/^\/+/, "");
-          await commitSingleFile(repo, branch, "workspace/" + tabFile, doc.content || "", "Update " + tabFile + " (" + new Date().toLocaleTimeString() + ")", headers);
+    async function commitSingleFile(config, path, content, message) {
+      const existing = await getGitHubFile(config, path);
+      if (existing?.type && existing.type !== "file") throw new Error("GitHub path is not a file: " + path);
+      if (existing?.encoding === "base64" && typeof existing.content === "string" &&
+          (existing.content.trim() ? decodeGitHubContent(existing.content) : "") === content) return;
+      await putGitHubFile(config, path, content, message, existing?.sha);
+    }
+
+    let githubWrites = Promise.resolve();
+
+    function queueGitHubWrite(config, write) {
+      const task = githubWrites.then(() => {
+        if (!sameGitHubSettings(config)) throw new Error("GitHub settings changed during the operation.");
+        return write();
+      });
+      githubWrites = task.catch(() => {});
+      return task;
+    }
+
+    function inboxFor(scope, state = roomState) {
+      return Object.hasOwn(state.inboxes, scope) ? state.inboxes[scope] : { importedExternalIds: [], requests: {} };
+    }
+
+    function updateExternalStatus(note = "") {
+      const label = document.getElementById("externalStatus");
+      const config = githubSettings();
+      if (!externalMode()) { label.textContent = ""; return; }
+      if (!config) { label.textContent = "ChatGPT Pro inbox needs GitHub settings."; return; }
+      const requests = Object.values(inboxFor(config.scope).requests);
+      const pending = requests.filter(request => request.status === "pending").length;
+      const unsent = requests.filter(request => request.status === "sending").length;
+      label.textContent = [pending ? pending + " awaiting ChatGPT Pro" : "ChatGPT Pro inbox ready",
+        unsent ? unsent + " unconfirmed. Use Let ChatGPT Speak First to retry." : "", note].filter(Boolean).join(" · ");
+    }
+
+    function saveInbox(scope, inbox, messages = transcript) {
+      persistRoom({ transcript: messages, inboxes: { ...roomState.inboxes, [scope]: inbox } });
+      updateExternalStatus();
+      scheduleGitHubSync();
+    }
+
+    async function requestExternalTurn(retryUnconfirmed = false, userMessage = transcript.findLast(msg => msg.css === "human")?.text || "") {
+      const config = githubSettings();
+      if (!config) throw new Error("Enter the GitHub repository, branch and token in Settings.");
+      const inbox = inboxFor(config.scope);
+      let request = retryUnconfirmed && Object.values(inbox.requests).find(item => item.status === "sending");
+      if (!request) {
+        const createdAt = new Date().toISOString();
+        const id = "turn-" + Date.now() + "-" + crypto.randomUUID();
+        request = { id, createdAt, status: "sending", userMessage };
+        saveInbox(config.scope, { ...inbox, requests: { ...inbox.requests, [id]: request } });
+      }
+
+      const { id, createdAt } = request;
+      const path = "inbox/turns/" + id + ".json";
+      const body = JSON.stringify({
+        version: 1, requestId: id, status: "pending", requestedAt: createdAt, requestedBy: "User",
+        promptNote: "ChatGPT Pro's turn is requested in the AI Group Room.",
+        latestMessage: request.userMessage ? { speaker: "You", text: request.userMessage } : null
+      }, null, 2) + "\n";
+      await queueGitHubWrite(config, async () => {
+        if (roomPaused || !externalMode() || restoring) throw new Error("The request is waiting for you to resume.");
+        try {
+          // A create-only PUT cannot modify an existing file because it never sends a blob SHA.
+          await putGitHubFile(config, path, body, "Request ChatGPT Pro turn " + id);
+        } catch (err) {
+          const existing = await getGitHubFile(config, path);
+          if (!existing || decodeGitHubContent(existing.content) !== body) throw err;
         }
-        await commitSingleFile(repo, branch, "workspace/SESSION_BACKUP.json", sessionSnapshot, "Save full workspace backup (" + new Date().toLocaleTimeString() + ")", headers);
-        const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-        syncBadge.textContent = "GitHub Sync: All " + workingDocs.length + " docs saved at " + time; syncBadge.className = "sync-badge sync-ok";
+      });
+      const latest = inboxFor(config.scope);
+      const current = latest.requests[id];
+      if (current?.status === "sending") {
+        saveInbox(config.scope, { ...latest, requests: { ...latest.requests, [id]: { ...current, status: "pending" } } });
+      }
+      if (!roomPaused) statusText.textContent = "ChatGPT Pro turn queued in GitHub. Open your ChatGPT conversation to answer it.";
+    }
+
+    function validInboxId(id) {
+      return typeof id === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(id);
+    }
+
+    function isPass(text) {
+      return /^PASS\.?$/i.test(text.trim());
+    }
+
+    async function pollExternalInbox() {
+      const config = githubSettings();
+      if (!config || !externalMode() || restoring || pollInFlight) return;
+      pollInFlight = true;
+      let shouldContinue = false;
+      let unreadable = false;
+      try {
+        const entries = await getGitHubFile(config, "inbox/chatgpt-pro");
+        if (!entries) return updateExternalStatus();
+        if (!Array.isArray(entries)) throw new Error("The inbox path must be a directory.");
+        for (const entry of entries) {
+          if (!sameGitHubSettings(config) || restoring || !externalMode()) break;
+          if (entry.type !== "file" || !entry.name?.endsWith(".json")) continue;
+          const id = entry.name.slice(0, -5);
+          if (!validInboxId(id) || !/^[a-f\d]{40}$/i.test(entry.sha)) continue;
+          const inbox = inboxFor(config.scope);
+          if (inbox.importedExternalIds.includes(id) ||
+              transcript.some(msg => msg.externalScope === config.scope && msg.externalId === id)) continue;
+          const blobKey = config.scope + "/" + entry.sha + "/" + id;
+          if (rejectedInboxBlobs.has(blobKey)) { unreadable = true; continue; }
+          let blob;
+          try {
+            const res = await fetch("https://api.github.com/repos/" + config.repo + "/git/blobs/" + entry.sha,
+              { headers: config.headers });
+            if (!res.ok) throw new Error("Inbox read failed.");
+            blob = await res.json();
+          } catch {
+            unreadable = true;
+            continue;
+          }
+          if (!sameGitHubSettings(config) || restoring || !externalMode()) break;
+
+          let payload;
+          try {
+            payload = JSON.parse(decodeGitHubContent(blob.content));
+            if (!payload || (payload.id != null && payload.id !== id) ||
+                typeof payload.content !== "string" || !payload.content.trim() ||
+                payload.content.length > 100000 || (payload.inReplyTo != null && !validInboxId(payload.inReplyTo))) {
+              throw new Error("Invalid inbox message");
+            }
+          } catch {
+            rejectedInboxBlobs.add(blobKey);
+            unreadable = true;
+            continue;
+          }
+
+          if (!sameGitHubSettings(config) || restoring || !externalMode()) break;
+          const latest = inboxFor(config.scope);
+          const replyTo = payload.inReplyTo;
+          const request = replyTo && Object.hasOwn(latest.requests, replyTo) ? latest.requests[replyTo] : null;
+          const requests = request && request.status !== "fulfilled"
+            ? { ...latest.requests, [replyTo]: { ...request, status: "fulfilled", replyId: id } } : latest.requests;
+          const timestamp = typeof payload.timestamp === "string" ? Date.parse(payload.timestamp) : NaN;
+          const message = makeMessage("chatgpt", "ChatGPT Pro", payload.content.trim(),
+            { externalScope: config.scope, externalId: id, inReplyTo: replyTo ?? null });
+          if (Number.isFinite(timestamp)) {
+            message.time = new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+          }
+          saveInbox(config.scope, { importedExternalIds: [...latest.importedExternalIds, id], requests },
+            [...transcript, message]);
+          appendMessageDOM(message);
+          shouldContinue ||= !roomPaused && !isRunning && !isPass(message.text) && (!request || requests !== latest.requests);
+        }
+        if (sameGitHubSettings(config) && externalMode()) {
+          updateExternalStatus(entries.length >= 1000 ? "GitHub inbox listing reached 1,000 entries."
+            : unreadable ? "Some inbox files could not be read." : "");
+        }
       } catch (err) {
-        syncBadge.textContent = "GitHub Sync Error: " + err.message; syncBadge.className = "sync-badge sync-err";
+        if (sameGitHubSettings(config) && externalMode()) updateExternalStatus(err.message);
+      } finally {
+        pollInFlight = false;
+        if (shouldContinue && sameGitHubSettings(config) && externalMode() && !roomPaused && !isRunning && !restoring &&
+            ["claudeKey", "geminiKey"].some(id => document.getElementById(id).value.trim())) {
+          await runOpenFloor(false, true);
+        }
       }
     }
 
+    function scheduleGitHubSync() {
+      roomRevision++;
+      const config = githubSettings();
+      clearTimeout(syncTimer);
+      if (!config || restoring) return;
+      syncBadge.textContent = "GitHub Sync: Queued...";
+      syncBadge.className = "sync-badge";
+      syncTimer = setTimeout(() => {
+        if (sameGitHubSettings(config)) syncAllToGitHub();
+      }, 2500);
+    }
+
+    function buildBackup(scope) {
+      const active = getActiveDoc();
+      return JSON.stringify({
+        version: 2, savedAt: new Date().toISOString(), brief: projectBrief.value,
+        refDocs, workingDocs, activeDocId, workTitle: active.title, workBody: active.content,
+        transcript: transcript.filter(msg => !msg.externalScope || msg.externalScope === scope),
+        inboxes: { [scope]: inboxFor(scope) }, roomPaused
+      }, null, 2);
+    }
+
+    async function syncAllToGitHub(manual = false) {
+      const config = githubSettings();
+      if (!config) { if (manual) alert("Enter the GitHub repository, branch and token first."); return; }
+      if (restoring) return;
+      if (syncInFlight) {
+        await syncInFlight.catch(() => {});
+        if (sameGitHubSettings(config)) return syncAllToGitHub(manual);
+        return;
+      }
+      clearTimeout(syncTimer);
+      const revision = roomRevision;
+      const chat = buildTranscriptMarkdown(transcript.filter(msg => !msg.externalScope || msg.externalScope === config.scope));
+      const backup = buildBackup(config.scope);
+      const docs = workingDocs.map(doc => ({ ...doc, file: doc.title.trim() || "UNTITLED.md" }));
+      const docsToWrite = docs.filter(doc => manual || dirtyDocIds.has(doc.id));
+      syncBadge.textContent = "GitHub Sync: Saving...";
+      syncBadge.className = "sync-badge";
+      syncInFlight = queueGitHubWrite(config, async () => {
+        await commitSingleFile(config, BACKUP_PATH, backup, "Save full workspace backup");
+        await commitSingleFile(config, "transcripts/SHARED_CHAT.md", chat, "Update chat transcript");
+        const keys = docs.map(doc => doc.file.toLowerCase());
+        for (const doc of docsToWrite) {
+          const key = doc.file.toLowerCase();
+          if (/[\\/]/.test(key) || [".", "..", "session_backup.json"].includes(key) ||
+              keys.indexOf(key) !== keys.lastIndexOf(key)) {
+            throw new Error("Working document filenames must be unique and cannot use reserved paths.");
+          }
+        }
+        for (const doc of docsToWrite) {
+          await commitSingleFile(config, "workspace/" + doc.file, doc.content, "Update " + doc.file);
+        }
+      });
+      try {
+        await syncInFlight;
+        if (revision === roomRevision && sameGitHubSettings(config)) {
+          for (const doc of docsToWrite) dirtyDocIds.delete(doc.id);
+        }
+        if (sameGitHubSettings(config)) {
+          syncBadge.textContent = "GitHub Sync: Saved";
+          syncBadge.className = "sync-badge sync-ok";
+        }
+      } catch (err) {
+        if (sameGitHubSettings(config)) {
+          syncBadge.textContent = "GitHub Sync Error: " + err.message;
+          syncBadge.className = "sync-badge sync-err";
+        }
+      } finally { syncInFlight = null; }
+    }
+
+    function mergeInboxes(saved) {
+      const merged = { ...saved };
+      for (const [scope, local] of Object.entries(roomState.inboxes)) {
+        const remote = inboxFor(scope, { inboxes: saved });
+        const requests = { ...remote.requests };
+        const ranks = { sending: 0, pending: 1, fulfilled: 2 };
+        for (const [id, request] of Object.entries(local.requests)) {
+          if (!Object.hasOwn(requests, id) || ranks[request.status] >= ranks[requests[id].status]) requests[id] = request;
+        }
+        merged[scope] = { importedExternalIds: [...new Set([...remote.importedExternalIds, ...local.importedExternalIds])], requests };
+      }
+      return merged;
+    }
+
+    function restoreTranscript(saved) {
+      const local = new Map();
+      const keyFor = msg => JSON.stringify([msg.externalScope, msg.externalId]);
+      for (const msg of transcript) {
+        if (msg.externalId) local.set(keyFor(msg), msg);
+      }
+      const seen = new Set();
+      const result = [];
+      for (const msg of saved) {
+        if (!msg.externalId) { result.push(msg); continue; }
+        const key = keyFor(msg);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        if (local.has(key)) result.push(local.get(key));
+        else if (!inboxFor(msg.externalScope).importedExternalIds.includes(msg.externalId)) result.push(msg);
+      }
+      for (const [key, msg] of local) {
+        if (!seen.has(key)) result.push(msg);
+      }
+      return result;
+    }
+
+    function validBackup(state) {
+      const text = value => typeof value === "string";
+      const record = value => value && typeof value === "object" && !Array.isArray(value);
+      if (!record(state) || !Array.isArray(state.transcript) ||
+          !state.transcript.every(msg => msg && [msg.css, msg.speaker, msg.text, msg.time].every(text) &&
+            (msg.externalId == null || (validInboxId(msg.externalId) && text(msg.externalScope) && msg.externalScope.includes("@")))) ||
+          (state.refDocs != null && (!Array.isArray(state.refDocs) ||
+            !state.refDocs.every(doc => doc && text(doc.name) && text(doc.content)))) ||
+          (state.brief != null && !text(state.brief))) return false;
+      if (!state.version) return text(state.workTitle) && text(state.workBody);
+      if (state.version !== 2 || !Array.isArray(state.workingDocs) || !state.workingDocs.length ||
+          !state.workingDocs.every(doc => doc && [doc.id, doc.title, doc.content, doc.gdocUrl].every(text)) ||
+          new Set(state.workingDocs.map(doc => doc.id)).size !== state.workingDocs.length || !record(state.inboxes)) return false;
+      return Object.entries(state.inboxes).every(([scope, inbox]) => scope.includes("@") && record(inbox) &&
+        Array.isArray(inbox.importedExternalIds) && inbox.importedExternalIds.every(validInboxId) && record(inbox.requests) &&
+        Object.entries(inbox.requests).every(([id, req]) => validInboxId(id) && req?.id === id &&
+          text(req.userMessage) && text(req.createdAt) && ["sending", "pending", "fulfilled"].includes(req.status)));
+    }
+
     async function loadFromGitHub() {
-      const token = document.getElementById("ghToken").value.trim();
-      const repo = document.getElementById("ghRepo").value.trim();
-      const branch = document.getElementById("ghBranch").value.trim() || "main";
-      if (!token || !repo) return alert("Enter your GitHub Token and Repository in Settings first.");
+      const config = githubSettings();
+      if (!config) return alert("Enter the GitHub repository, branch and token first.");
+      if (restoring || isRunning || syncInFlight) return alert("Wait for the current operation to finish before restoring.");
+      if (!confirm("Restore the saved workspace from " + config.repo + " (" + config.branch + ")? This replaces local workspace edits.")) return;
+      restoring = true;
+      setControlsState(false);
+      clearTimeout(syncTimer);
+      const before = roomRevision;
       statusText.textContent = "Loading saved workspace from GitHub...";
       try {
-        const apiUrl = ["https://github.com", "repos", repo, "contents", "workspace/SESSION_BACKUP.json"].join("/") + "?ref=" + encodeURIComponent(branch);
-        const res = await fetch(apiUrl, { headers: { "Authorization": "Bearer " + token, "Accept": "application/vnd.github+json" } });
-        if (!res.ok) throw new Error("No saved backup found yet (HTTP " + res.status + ")");
-        const data = await res.json();
-        const bin = atob(data.content.replace(/\n/g, ""));
-        const bytes = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-        const state = JSON.parse(new TextDecoder().decode(bytes));
-        projectBrief.value = state.brief || "";
-        refDocs = state.refDocs || [];
-        workingDocTitle.value = state.workTitle || "WORKING_DOC.md";
-        workingDocContent.value = state.workBody || "";
-        transcript = state.transcript || [];
-        localStorage.setItem(KEYS.BRIEF, projectBrief.value);
-        saveRefDocs();
-        localStorage.setItem(KEYS.WORK_TITLE, workingDocTitle.value);
-        localStorage.setItem(KEYS.WORK_BODY, workingDocContent.value);
-        localStorage.setItem(KEYS.TRANSCRIPT, JSON.stringify(transcript));
+        const res = await fetch(contentsUrl(config, BACKUP_PATH), {
+          headers: { ...config.headers, Accept: "application/vnd.github.raw+json" }, cache: "no-store"
+        });
+        if (!res.ok) throw new Error("Could not read the backup (HTTP " + res.status + ").");
+        const state = await res.json();
+        if (!validBackup(state)) throw new Error("Invalid workspace backup.");
+        if (!sameGitHubSettings(config) || roomRevision !== before) throw new Error("Settings or workspace changed during restore.");
+
+        let docs = state.workingDocs;
+        let active = state.activeDocId;
+        if (!docs) {
+          const existing = resolveProposalTarget(state.workTitle.trim());
+          const legacy = { id: existing?.id || "doc_" + crypto.randomUUID(),
+            title: state.workTitle, content: state.workBody, gdocUrl: existing?.gdocUrl || "" };
+          const pristine = workingDocs.length === 1 && workingDocs[0].id === "doc_1" &&
+            workingDocs[0].title === "Character Bible.md" && !workingDocs[0].content && !workingDocs[0].gdocUrl;
+          docs = existing ? workingDocs.map(doc => doc === existing ? legacy : doc) : pristine ? [legacy] : [...workingDocs, legacy];
+          active = legacy.id;
+        }
+        const next = {
+          transcript: restoreTranscript(state.transcript),
+          inboxes: mergeInboxes(state.inboxes || {}),
+          workingDocs: docs,
+          activeDocId: docs.some(doc => doc.id === active) ? active : docs[0].id,
+          refDocs: state.refDocs || [],
+          brief: state.brief || "",
+          roomPaused: roomPaused || state.roomPaused === true
+        };
+        persistRoom(next);
+        ({ workingDocs, activeDocId, refDocs, roomPaused } = next);
+        projectBrief.value = next.brief;
+        dirtyDocIds.clear();
         renderRefDocs();
+        renderDocTabs();
         renderAll();
-        statusText.textContent = "Restored full workspace from GitHub (" + new Date(state.savedAt).toLocaleString() + ").";
+        updateExternalStatus();
+        statusText.textContent = roomPaused ? "Workspace restored. Room paused." : "Workspace restored from GitHub.";
       } catch (err) {
         statusText.textContent = "Load Error: " + err.message;
+      } finally {
+        restoring = false;
+        setControlsState(false);
+        updateSyncBadge();
+        if (roomRevision !== before) scheduleGitHubSync();
       }
     }
  // Google Doc Pull & Push Bridge
@@ -697,7 +1105,8 @@ function extractGoogleDocId(urlStr) {
 async function pullFromGoogleDoc() {
       const url = document.getElementById("gdocUrl").value.trim();
       const secret = document.getElementById("gdocSecret").value.trim();
-      const docId = extractGoogleDocId(workingDocGdocUrl.value);
+      const doc = getActiveDoc();
+      const docId = extractGoogleDocId(doc.gdocUrl);
       if (!url || !secret) return alert("Enter your Apps Script Web App URL and Secret Key in Settings first.");
       if (!docId) return alert("Paste your Google Doc link into the 'Paste this tab's Google Doc link here' box above the editor first.");
       statusText.textContent = "Pulling latest text from Google Doc...";
@@ -707,24 +1116,25 @@ async function pullFromGoogleDoc() {
           headers: { "Content-Type": "text/plain;charset=utf-8" },
           body: JSON.stringify({ action: "pull", key: secret, docId: docId })
         });
+        if (!res.ok) throw new Error("Google Docs bridge returned HTTP " + res.status + ".");
         const text = await res.text();
         if (text === "Unauthorized") throw new Error("Invalid Secret Key.");
         const data = JSON.parse(text);
-        const cur = getActiveDoc();
-        cur.title = (data.title || "GOOGLE_DOC") + ".md";
-        cur.content = data.content || "";
+        if (!workingDocs.includes(doc) || extractGoogleDocId(doc.gdocUrl) !== docId) return;
+        doc.title = (data.title || "GOOGLE_DOC") + ".md";
+        doc.content = data.content || "";
         renderDocTabs();
-        saveWorkingDocs();
+        saveWorkingDocs(doc);
         statusText.textContent = "Pulled '" + data.title + "' from Google Docs!";
       } catch (err) {
         statusText.textContent = "Google Doc Pull Error: " + err.message;
       }
     }
 
-    async function pushToGoogleDoc(manual = false) {
+    async function pushToGoogleDoc(manual = false, doc = getActiveDoc()) {
       const url = document.getElementById("gdocUrl").value.trim();
       const secret = document.getElementById("gdocSecret").value.trim();
-      const docId = extractGoogleDocId(workingDocGdocUrl.value);
+      const docId = extractGoogleDocId(doc.gdocUrl);
       if (!url || !secret || !docId) {
         if (manual) alert("Make sure your Apps Script URL, Secret Key, and this tab's Google Doc link are filled in.");
         return;
@@ -734,8 +1144,9 @@ async function pullFromGoogleDoc() {
         const res = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body: JSON.stringify({ key: secret, docId: docId, content: workingDocContent.value })
+          body: JSON.stringify({ key: secret, docId: docId, content: doc.content })
         });
+        if (!res.ok) throw new Error("Google Docs bridge returned HTTP " + res.status + ".");
         const text = await res.text();
         if (text === "Unauthorized") throw new Error("Invalid Secret Key.");
         statusText.textContent = "Synced to live Google Doc at " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) + ".";
@@ -744,9 +1155,15 @@ async function pullFromGoogleDoc() {
       }
     }
     function clearChat() {
+      if (restoring) return;
       if (!confirm("Clear the chat log? (Your Pinned Brief, Reference Docs, and Working Document will remain.)")) return;
-      transcript = []; saveTranscript(); renderAll(); statusText.textContent = "Chat cleared.";
+      persistRoom({ transcript: [] });
+      scheduleGitHubSync();
+      renderAll();
+      statusText.textContent = "Chat cleared.";
     }
+    setInterval(pollExternalInbox, 12000);
+    pollExternalInbox();
   </script>
 </body>
 </html>
