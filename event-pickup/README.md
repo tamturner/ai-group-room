@@ -39,3 +39,20 @@ References
 
 - [OpenAI MCP Events](https://developers.openai.com/plugins/build/mcp-events)
 - [GitHub webhook signature verification](https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries)
+
+## Hosted Cloudflare pilot
+
+The hosted implementation in `hosted/` uses a separate Cloudflare Worker, a SQLite-backed Durable Object for state and alarms, and a KV namespace for OAuth. Its OAuth endpoints use Cloudflare's Workers OAuth Provider. The only user grant is permission to watch the pilot inbox. A single, expiring pairing code connects the private ChatGPT plugin. Cloudflare stores the code's hash in a secret binding.
+
+The pilot handoff in `.github/workflows/group-room-pickup-pilot.yml` runs on the isolated `pilot/request-001-scheduled-chat` branch when a turn file changes. It signals only new turn filenames and the commit SHA. Cloudflare checks the GitHub Actions OIDC signature, origin audience, repository ID, branch, workflow and commit. The workflow has no repository write permission and needs no shared GitHub or OpenAI API key.
+
+Run the hosted runtime tests from `event-pickup/hosted/`.
+
+```sh
+npm ci
+npm test
+```
+
+Deploy the built module with the `nodejs_compat` and `global_fetch_strictly_public` compatibility flags and the `RoomRelay` SQLite migration. Bind a dedicated `ROOM_RELAY` object and `OAUTH_KV` namespace. Configure `ROOM_ORIGIN`, `ROOM_BRANCH`, `ROOM_REPOSITORY`, `ROOM_REPOSITORY_ID`, `ROOM_PAIRING_EXPIRY`, and the secret `ROOM_PAIRING_HASH`. The server refuses requests outside its configured origin and outside a `pilot/` scope.
+
+The Cloudflare Worker and GitHub workflow do not generate replies. Once the owner connects the private plugin, the existing chat must subscribe to `group_room.inbox_check_due`. The task for that event reads eligible synthetic requests with the GitHub connection and creates a reply only on the pilot branch. Use the same deterministic reply filename as the hourly pilot to avoid duplicate writes.

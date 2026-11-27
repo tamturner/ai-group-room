@@ -1,0 +1,39 @@
+name: Signal a new Group Room pilot request
+on:
+  push:
+    branches:
+      - pilot/request-001-scheduled-chat
+    paths:
+      - 'inbox/turns/turn-*.json'
+
+permissions: {}
+
+jobs:
+  signal:
+    if: ${{ github.repository == 'tamturner/ai-group-room' && !github.event.created && !github.event.deleted && !github.event.forced }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      id-token: write
+    env:
+      PICKUP_ENDPOINT: https://ai-group-room-pickup-pilot.bridge-edge-7f29c6.workers.dev/github
+    steps:
+      - name: Send new turn filenames only
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload=$(jq -c '
+            {sha: .after, files:
+              [.commits[].added[] | select(test("^inbox/turns/turn-[0-9]+-[a-f0-9]{8}-([a-f0-9]{4}-){3}[a-f0-9]{12}\\.json$"))]
+              | unique
+            }
+          ' "$GITHUB_EVENT_PATH")
+          if [[ "$(jq '.files | length' <<< "$payload")" == 0 ]]; then exit 0; fi
+          audience=$(jq -rn --arg url "$PICKUP_ENDPOINT" '$url | @uri')
+          endpoint="${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=$audience"
+          token=$(curl --silent --show-error --fail --max-time 10 \
+            --header "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$endpoint" | jq -er '.value')
+          echo "::add-mask::$token"
+          curl --silent --show-error --fail-with-body --max-time 15 --retry 2 \
+            --header "Authorization: Bearer $token" --header 'Content-Type: application/json' \
+            --data-binary "$payload" "$PICKUP_ENDPOINT"

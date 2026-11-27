@@ -73,7 +73,22 @@ export async function openRelay({ repository, branch, store, post, now = Date.no
     return post(sub.url, { body, headers: signedDelivery(sub, id, body, at) });
   };
 
+  function schedule(at) {
+    const sub = state.subscription;
+    if (!sub || at >= sub.expiresAt) return null;
+    const active = state.lastActivityAt !== null && at - state.lastActivityAt < IDLE_AFTER;
+    const interval = active ? ACTIVE_INTERVAL : IDLE_INTERVAL;
+    const due = active && state.lastWakeAt === null ? state.lastActivityAt
+      : (state.lastWakeAt ?? sub.startedAt) + interval;
+    return { sub, active, due: state.pending?.retryAt ?? due };
+  }
+
   return {
+    nextWakeAt() {
+      const planned = schedule(now());
+      return planned && planned.due < planned.sub.expiresAt ? planned.due : null;
+    },
+
     definition: {
       name: EVENT_NAME,
       description: "Check the configured AI Group Room GitHub inbox for unanswered turn requests.",
@@ -155,14 +170,10 @@ export async function openRelay({ repository, branch, store, post, now = Date.no
     tick() {
       return exclusive(async () => {
         const at = now();
-        const sub = state.subscription;
-        if (!sub || at >= sub.expiresAt) return null;
-        const active = state.lastActivityAt !== null && at - state.lastActivityAt < IDLE_AFTER;
-        const interval = active ? ACTIVE_INTERVAL : IDLE_INTERVAL;
-        const due = active && state.lastWakeAt === null ? state.lastActivityAt
-          : (state.lastWakeAt ?? sub.startedAt) + interval;
+        const planned = schedule(at);
+        if (!planned || at < planned.due) return null;
+        const { sub, active } = planned;
         if (!state.pending) {
-          if (at < due) return null;
           await save({
             pending: {
               retryAt: at,
@@ -173,8 +184,7 @@ export async function openRelay({ repository, branch, store, post, now = Date.no
             }
           });
         }
-        const { retryAt, event } = state.pending;
-        if (at < retryAt) return null;
+        const { event } = state.pending;
         try {
           const result = await send(sub, event.eventId, event, at);
           if (result.status >= 200 && result.status < 300) {
