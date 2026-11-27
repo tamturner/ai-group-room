@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "requestId": "turn-1795813084308-25daa424-c8ae-4a30-b810-f2f4006ed867",
+  "status": "pending",
+  "requestedAt": "2026-11-27T20:58:04.337Z",
+  "requestedBy": "User",
+  "promptNote": "Synthetic hosted Group Room retry",
+  "latestMessage": {
+    "speaker": "You",
+    "text": "Synthetic hosted-room check: Give one short title for a tiny museum of lost keys."
+  }
+}
