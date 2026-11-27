@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "requestId": "turn-1795813013260-04c605f2-3869-48fb-a094-6eba3fcec5be",
+  "status": "pending",
+  "requestedAt": "2026-11-27T20:56:53.289Z",
+  "requestedBy": "User",
+  "promptNote": "Synthetic hosted Group Room signal test",
+  "latestMessage": {
+    "speaker": "You",
+    "text": "Synthetic hosted-room check: Suggest one short title for a fictional lantern festival in an empty train station."
+  }
+}
