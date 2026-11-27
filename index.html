@@ -103,9 +103,16 @@
     </div>
     <div class="section-title">Direct GitHub Repo Auto-Commit</div>
     <div class="grid-3">
-      <div><label>GitHub Personal Access Token</label><input type="password" id="ghToken" placeholder="github_pat_... or ghp_..." /></div>
-      <div><label>Repository (owner/repo)</label><input type="text" id="ghRepo" placeholder="tamturner/ai-group-room" /></div>
-      <div><label>Branch</label><input type="text" id="ghBranch" value="main" /></div>
+         <div class="section-title">Live Google Doc Bridge (Optional)</div>
+    <div class="grid-3">
+      <div style="grid-column: span 2;">
+        <label>Google Apps Script Web App URL</label>
+        <input type="text" id="gdocUrl" placeholder="https://google.com" />
+      </div>
+      <div>
+        <label>Script Secret Key</label>
+        <input type="password" id="gdocSecret" placeholder="my-secret-room-key" />
+      </div>
     </div>
     <div class="checkbox-row">
       <input type="checkbox" id="rememberKeys" />
@@ -140,6 +147,8 @@
         <label style="color:#3fb950; font-size:0.85rem;">Live Shared Working Document</label>
         <div style="display:flex; gap:0.4rem;">
           <input type="file" id="workingFileInput" accept=".txt,.md,.json,.csv,.js,.py,.html,.css,.docx" style="display:none;" />
+         <button class="secondary" style="padding:0.3rem 0.6rem; font-size:0.78rem;" onclick="pullFromGoogleDoc()">Pull GDoc</button>
+          <button class="secondary" style="padding:0.3rem 0.6rem; font-size:0.78rem;" onclick="pushToGoogleDoc(true)">Push GDoc</button>
           <button class="secondary" style="padding:0.3rem 0.6rem; font-size:0.78rem;" onclick="document.getElementById('workingFileInput').click()">Load File</button>
           <button class="secondary" style="padding:0.3rem 0.6rem; font-size:0.78rem;" onclick="downloadWorkingDoc()">Download</button>
         </div>
@@ -331,6 +340,7 @@
       const btn = document.getElementById("btn_" + propId);
       if (btn) { btn.textContent = "Applied to Working Document"; btn.disabled = true; btn.style.background = "#238636"; }
       scheduleGitHubSync();
+      pushToGoogleDoc(false);
       statusText.textContent = "Approved & applied " + prop.speaker + "'s edit to " + workingDocTitle.value + ".";
     }
 
@@ -548,7 +558,63 @@
         syncBadge.textContent = "GitHub Sync Error: " + err.message; syncBadge.className = "sync-badge sync-err";
       }
     }
+ // Google Doc Pull & Push Bridge
+    (function initGoogleDocBridge() {
+      const saved = JSON.parse(localStorage.getItem("ai_ws_gdoc_v1") || "{}");
+      if (saved.url) document.getElementById("gdocUrl").value = saved.url;
+      if (saved.secret) document.getElementById("gdocSecret").value = saved.secret;
+      ["gdocUrl", "gdocSecret"].forEach(id => {
+        document.getElementById(id).addEventListener("input", () => {
+          localStorage.setItem("ai_ws_gdoc_v1", JSON.stringify({
+            url: document.getElementById("gdocUrl").value.trim(),
+            secret: document.getElementById("gdocSecret").value.trim()
+          }));
+        });
+      });
+    })();
 
+    async function pullFromGoogleDoc() {
+      const url = document.getElementById("gdocUrl").value.trim();
+      const secret = document.getElementById("gdocSecret").value.trim();
+      if (!url || !secret) return alert("Enter your Google Apps Script Web App URL and Secret Key in Settings first.");
+      statusText.textContent = "Pulling latest text from Google Doc...";
+      try {
+        const res = await fetch(url + "?key=" + encodeURIComponent(secret));
+        const text = await res.text();
+        if (text === "Unauthorized") throw new Error("Invalid Secret Key.");
+        const data = JSON.parse(text);
+        workingDocTitle.value = (data.title || "GOOGLE_DOC") + ".md";
+        workingDocContent.value = data.content || "";
+        localStorage.setItem(KEYS.WORK_TITLE, workingDocTitle.value);
+        localStorage.setItem(KEYS.WORK_BODY, workingDocContent.value);
+        scheduleGitHubSync();
+        statusText.textContent = "Pulled latest content from Google Doc (" + data.title + ").";
+      } catch (err) {
+        statusText.textContent = "Google Doc Pull Error: " + err.message;
+      }
+    }
+
+    async function pushToGoogleDoc(manual = false) {
+      const url = document.getElementById("gdocUrl").value.trim();
+      const secret = document.getElementById("gdocSecret").value.trim();
+      if (!url || !secret) {
+        if (manual) alert("Enter your Google Apps Script Web App URL and Secret Key in Settings first.");
+        return;
+      }
+      statusText.textContent = "Pushing working document to Google Doc...";
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({ key: secret, content: workingDocContent.value })
+        });
+        const text = await res.text();
+        if (text === "Unauthorized") throw new Error("Invalid Secret Key.");
+        statusText.textContent = "Saved to live Google Doc at " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) + ".";
+      } catch (err) {
+        statusText.textContent = "Google Doc Push Error: " + err.message;
+      }
+    }
     function clearChat() {
       if (!confirm("Clear the chat log? (Your Pinned Brief, Reference Docs, and Working Document will remain.)")) return;
       transcript = []; saveTranscript(); renderAll(); statusText.textContent = "Chat cleared.";
