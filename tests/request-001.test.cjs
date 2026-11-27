@@ -81,7 +81,8 @@ async function createRoom(t, options = {}) {
     }
     calls.push(call);
     if ([claude, gemini, openai].includes(url.href)) {
-      if (hooks.model) await hooks.model(call);
+      const override = await hooks.model?.(call);
+      if (override) return json(override);
       if (url.href === claude) return json({ content: [{ type: "text", text: "Mock Claude" }] });
       if (url.href === gemini) return json({ candidates: [{ content: { parts: [{ text: "Mock Gemini" }] } }] });
       return json({ choices: [{ message: { content: "Mock OpenAI" } }] });
@@ -220,7 +221,7 @@ test("Pause still imports safe replies, deduplicates and correlates out-of-order
   assert.equal(await page.locator(".msg.chatgpt").count(), 0);
 });
 
-test("an unpaused reply runs only configured room models and Pause stops an in-flight round", async t => {
+test("an unpaused reply runs up to five rounds without OpenAI and Pause stops an in-flight round", async t => {
   const { page, calls, files, putFile, hooks } = await createRoom(t, { models: true });
   await page.locator("#chatgptFirstBtn").click();
   await settle(page);
@@ -254,10 +255,21 @@ test("an unpaused reply runs only configured room models and Pause stops an in-f
   await settle(page);
   const nextId = JSON.parse(files.get(turnFiles(files)[1]).content).requestId;
   addReply(putFile, "next-reply", "Second demo reply", nextId);
+  const beforeDiscussion = calls.length;
   await poll(page);
-  assert.ok(calls.some(call => call.url === gemini && call.headers["x-goog-api-key"] === "mock-gemini"));
+  const discussion = calls.slice(beforeDiscussion);
+  assert.equal(discussion.filter(call => call.url === claude).length, 5);
+  assert.equal(discussion.filter(call => call.url === gemini && call.headers["x-goog-api-key"] === "mock-gemini").length, 5);
   assert.equal(calls.filter(call => call.url === openai).length, 0);
   assert.equal(turnFiles(files).length, 2);
+
+  hooks.model = call => call.url === claude ? { content: [{ type: "text", text: "PASS" }] }
+    : { candidates: [{ content: { parts: [{ text: "PASS" }] } }] };
+  addReply(putFile, "no-more-ideas", "Any last ideas?");
+  const beforePass = calls.length;
+  await poll(page);
+  assert.deepEqual(calls.slice(beforePass).filter(call => [claude, gemini, openai].includes(call.url)).map(call => call.url),
+    [claude, gemini]);
 });
 
 test("proposal approval stays with its target across tab switches and reloads", async t => {

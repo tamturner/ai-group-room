@@ -41,6 +41,7 @@ NODE_PATH="$test_runtime/node_modules" \
 
 ## Operational limits
 
+- In External ChatGPT Pro mode, an imported reply can start up to five automatic rounds among configured Claude and Gemini models. The discussion stops early if every participating model passes in a round. These rounds use the respective providers' API keys. External mode does not call the OpenAI API.
 - An active ChatGPT session or an independently configured writer must create replies. The room polls GitHub while it is open, approximately every 12 seconds in a foreground browser tab.
 - Use a new ID for each reply. A file is treated as immutable by the room once imported. GitHub permissions determine who can write or edit files in the repository.
 - GitHub's Contents API lists at most 1,000 entries in an inbox directory. Backups are full snapshots for one room browser at a time. Separate browsers can still compete to write the same snapshot and transcript.

@@ -200,6 +200,7 @@
     const dirtyDocIds = new Set();
     const rejectedInboxBlobs = new Set();
     const BACKUP_PATH = "workspace/SESSION_BACKUP.json";
+    const MAX_DISCUSSION_ROUNDS = 5;
 
     const chatBox = document.getElementById("chatBox");
     const statusText = document.getElementById("statusText");
@@ -626,11 +627,11 @@
       }
 
       try {
-        for (let round = 0; round < 2; round++) {
+        for (let round = 0; round < MAX_DISCUSSION_ROUNDS; round++) {
           let someoneSpoke = false;
           for (const agent of activeAgents) {
             if (abortRequested) break;
-            statusText.textContent = "Round " + (round + 1) + ": Sending to " + agent.name + "...";
+            statusText.textContent = "Round " + (round + 1) + " of " + MAX_DISCUSSION_ROUNDS + ": Sending to " + agent.name + "...";
             const prompt = formatTranscriptForPrompt(agent.name).replace(
               "If you have nothing meaningful to add right now, reply strictly with the word PASS.",
               round === 0
