@@ -555,15 +555,24 @@ syncBadge.textContent = "GitHub Sync: Committing..."; syncBadge.className = "syn
 const headers = { "Authorization": Bearer ${token}, "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json" };
 const workFile = (workingDocTitle.value.trim() || "WORKING_DOC.md").replace(/^/+/, "");
 try {
-await commitSingleFile(repo, branch, "transcripts/SHARED_CHAT.md", buildTranscriptMarkdown(), Update chat transcript (${new Date().toLocaleTimeString()}), headers);
-await commitSingleFile(repo, branch, workspace/${workFile}, workingDocContent.value, Update working doc ${workFile} (${new Date().toLocaleTimeString()}), headers);
-const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-syncBadge.textContent = GitHub Sync: Saved chat & ${workFile} at ${time}; syncBadge.className = "sync-badge sync-ok";
-} catch (err) {
-syncBadge.textContent = GitHub Sync Error: ${err.message}; syncBadge.className = "sync-badge sync-err";
-}
-}
-function clearChat() {
-if (!confirm("Clear the chat log? (Your Pinned Brief, Reference Docs, and Working Document will remain.)")) return;
-transcript = []; saveTranscript(); renderAll(); statusText.textContent = "Chat cleared.";
-}
+        await commitSingleFile(repo, branch, "transcripts/SHARED_CHAT.md", buildTranscriptMarkdown(), "Update chat transcript (" + new Date().toLocaleTimeString() + ")", headers);
+        await commitSingleFile(repo, branch, "workspace/" + workFile, workingDocContent.value, "Update working doc " + workFile + " (" + new Date().toLocaleTimeString() + ")", headers);
+        const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        syncBadge.textContent = "GitHub Sync: Saved chat & " + workFile + " at " + time;
+        syncBadge.className = "sync-badge sync-ok";
+      } catch (err) {
+        syncBadge.textContent = "GitHub Sync Error: " + err.message;
+        syncBadge.className = "sync-badge sync-err";
+      }
+    }
+
+    function clearChat() {
+      if (!confirm("Clear the chat log? (Your Pinned Brief, Reference Docs, and Working Document will remain.)")) return;
+      transcript = [];
+      saveTranscript();
+      renderAll();
+      statusText.textContent = "Chat cleared.";
+    }
+  </script>
+</body>
+</html>
