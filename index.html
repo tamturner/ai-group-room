@@ -1,7 +1,8 @@
 html
 <!DOCTYPE html>
 <html lang="en">
-<head>
+<script src="https://cloudflare.com"></script>
+  <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AI Group Room — Collaborative Workspace</title>
@@ -81,7 +82,7 @@ html
   <details class="card">
     <summary>Reference Documents Drawer (<span id="refCount">0</span> files — Click to upload or toggle context docs)</summary>
     <div style="margin-top:0.75rem;">
-      <input type="file" id="refFileInput" multiple accept=".txt,.md,.json,.csv,.js,.py,.html,.css,.xml,.yaml,.yml" style="display:none;" />
+      <input type="file" id="refFileInput" multiple accept=".txt,.md,.json,.csv,.js,.py,.html,.css,.xml,.yaml,.yml,.docx" style="display:none;" />
       <button class="secondary" onclick="document.getElementById('refFileInput').click()">+ Upload Reference Files (.md, .txt, .json, .csv, code)</button>
       <span style="font-size:0.8rem; color:#8b949e; margin-left:0.5rem;">Checked files are read-only context visible to all AIs.</span>
       <div class="ref-list" id="refList"></div>
@@ -136,7 +137,21 @@ html
 
     <!-- LIVE SHARED WORKING DOCUMENT -->
     <div class="card" style="margin-bottom:0;">
-```html
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.4rem;">
+        <label style="color:#3fb950; font-size:0.85rem;">Live Shared Working Document</label>
+        <div style="display:flex; gap:0.4rem;">
+          <input type="file" id="workingFileInput" accept=".txt,.md,.json,.csv,.js,.py,.html,.css,.docx" style="display:none;" />
+          <button class="secondary" style="padding:0.3rem 0.6rem; font-size:0.78rem;" onclick="document.getElementById('workingFileInput').click()">Load File</button>
+          <button class="secondary" style="padding:0.3rem 0.6rem; font-size:0.78rem;" onclick="downloadWorkingDoc()">Download</button>
+        </div>
+      </div>
+      <input type="text" id="workingDocTitle" value="WORKING_DOC.md" placeholder="Document filename (e.g. SPEC.md)" style="margin-bottom:0.5rem; font-weight:600;" />
+      <textarea id="workingDocContent" class="doc-editor" placeholder="Paste or load the document everyone is actively collaborating on here. You can edit it directly anytime, or approve edits proposed by ChatGPT, Claude, or Gemini in the chat..."></textarea>
+      <div style="font-size:0.76rem; color:#8b949e; margin-top:0.4rem;">
+        Tip: Ask any AI to "propose an edit to the working doc" — an <b>Approve &amp; Apply</b> button will appear in chat before any change is made.
+      </div>
+    </div>
+  </div>
   <script>
     const KEYS = {
       TRANSCRIPT: "ai_ws_transcript_v3",
