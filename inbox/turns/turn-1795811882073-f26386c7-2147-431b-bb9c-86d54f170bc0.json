@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "requestId": "turn-1795811882073-f26386c7-2147-431b-bb9c-86d54f170bc0",
+  "status": "pending",
+  "requestedAt": "2026-11-27T20:38:02.073Z",
+  "requestedBy": "User",
+  "promptNote": "ChatGPT Pro's turn is requested in the AI Group Room.",
+  "latestMessage": {
+    "speaker": "You",
+    "text": "Synthetic recurring-room check: Suggest one short title for a fictional Cloud Library brainstorming session."
+  }
+}
