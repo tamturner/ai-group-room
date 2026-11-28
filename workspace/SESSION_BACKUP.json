@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "savedAt": "2026-11-28T10:05:40.399Z",
+  "savedAt": "2026-11-28T10:07:38.280Z",
   "brief": "",
   "refDocs": [],
   "workingDocs": [
@@ -32,15 +32,39 @@
       "externalScope": "tamturner/ai-group-room@pilot/request-001-scheduled-chat",
       "externalId": "scheduled-reply-turn-1795811882073-f26386c7-2147-431b-bb9c-86d54f170bc0",
       "inReplyTo": "turn-1795811882073-f26386c7-2147-431b-bb9c-86d54f170bc0"
+    },
+    {
+      "css": "human",
+      "speaker": "You",
+      "text": "Synthetic recurring-room check: Suggest a one-word name for a fictional rubber duck.",
+      "time": "02:06 AM"
+    },
+    {
+      "css": "chatgpt",
+      "speaker": "ChatGPT Pro",
+      "text": "Puddles",
+      "time": "02:07 AM",
+      "externalScope": "tamturner/ai-group-room@pilot/request-001-scheduled-chat",
+      "externalId": "scheduled-reply-turn-1795860379044-89d89206-61e3-46a5-8568-172a95f0b16b",
+      "inReplyTo": "turn-1795860379044-89d89206-61e3-46a5-8568-172a95f0b16b"
     }
   ],
   "inboxes": {
     "tamturner/ai-group-room@pilot/request-001-scheduled-chat": {
       "importedExternalIds": [
         "scheduled-pilot-reply-001",
-        "scheduled-reply-turn-1795811882073-f26386c7-2147-431b-bb9c-86d54f170bc0"
+        "scheduled-reply-turn-1795811882073-f26386c7-2147-431b-bb9c-86d54f170bc0",
+        "scheduled-reply-turn-1795860379044-89d89206-61e3-46a5-8568-172a95f0b16b"
       ],
-      "requests": {}
+      "requests": {
+        "turn-1795860379044-89d89206-61e3-46a5-8568-172a95f0b16b": {
+          "id": "turn-1795860379044-89d89206-61e3-46a5-8568-172a95f0b16b",
+          "createdAt": "2026-11-28T10:06:19.044Z",
+          "status": "fulfilled",
+          "userMessage": "Synthetic recurring-room check: Suggest a one-word name for a fictional rubber duck.",
+          "replyId": "scheduled-reply-turn-1795860379044-89d89206-61e3-46a5-8568-172a95f0b16b"
+        }
+      }
     }
   },
   "roomPaused": false
