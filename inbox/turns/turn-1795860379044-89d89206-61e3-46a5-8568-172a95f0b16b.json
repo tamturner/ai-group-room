@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "requestId": "turn-1795860379044-89d89206-61e3-46a5-8568-172a95f0b16b",
+  "status": "pending",
+  "requestedAt": "2026-11-28T10:06:19.044Z",
+  "requestedBy": "User",
+  "promptNote": "ChatGPT Pro's turn is requested in the AI Group Room.",
+  "latestMessage": {
+    "speaker": "You",
+    "text": "Synthetic recurring-room check: Suggest a one-word name for a fictional rubber duck."
+  }
+}
